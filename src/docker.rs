@@ -29,7 +29,7 @@ pub struct ContainerOptions {
 }
 
 pub struct DockerInstance {
-    docker: Docker,
+    pub docker: Docker,
 }
 
 impl DockerInstance {

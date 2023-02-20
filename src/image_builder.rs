@@ -1,4 +1,4 @@
-use bytes::Bytes;
+use bytes::{Bytes, BytesMut};
 use std::{
     fs,
     io::Write,
@@ -11,6 +11,9 @@ use crate::rwbuf::RWBuffer;
 use bollard::service::ContainerConfig;
 use crc::{Crc, CRC_32_ISO_HDLC};
 use std::rc::Rc;
+use awc::error::SendRequestError::Http;
+use bollard::container;
+use bollard::container::UploadToContainerOptions;
 
 pub(crate) const STEPS: usize = 3;
 
@@ -42,18 +45,44 @@ pub async fn build_image(
         .create_container(options)
         .await
         .spinner_result(&spinner)?;
+    docker.start_container(cont_name).await.spinner_result(&spinner)?; // TODO: remove this (it's just for testing
 
     let spinner = Spinner::new("Copying image contents".to_string()).ticking();
     let (hash, cfg) = docker.get_config(cont_name).await.spinner_err(&spinner)?;
-    let tar_bytes = docker
-        .download(cont_name, "/")
-        .await
-        .spinner_err(&spinner)?
-        .freeze();
-    let mut tar = tar_from_bytes(&tar_bytes).spinner_err(&spinner)?;
+
+    let options = container::DownloadFromContainerOptions { path: "/".to_owned() };
+    let mut stream_in = docker.docker.download_from_container(cont_name, Some(options));
+
+
+    let squashfs_image = "prekucki/squashfs-tools:latest";
+    let squashfs_cont = "sqfs-tools";
+    let start_cmd = vec!["tail", "-f", "/dev/null"]; // prevent container from exiting
+    let options = ContainerOptions {
+        image_name: squashfs_image.to_owned(),
+        container_name: squashfs_cont.to_owned(),
+        mounts: None,
+        cmd: Some(start_cmd.iter().map(|s| s.to_string()).collect()),
+        env: None,
+        volumes: None,
+        entrypoint: None,
+    };
+    docker.create_container(options).await?;
+    docker.start_container(squashfs_cont).await?;
+    let opt = UploadToContainerOptions {
+        path: "/work/in".to_owned(),
+        no_overwrite_dir_non_dir: "1".to_string(),
+    };
+    let body = hyper::Body::wrap_stream(stream_in);
+    let upload_stream = docker.docker.upload_to_container(squashfs_cont, Some(opt), body);
+    let res = upload_stream.await?;
+    println!("res: {:?}", res);
+
+    let mut tar = tar::Builder::new(RWBuffer::new());
 
     docker
-        .remove_container(cont_name)
+        .stop_container(cont_name).await.spinner_result(&spinner)?;
+
+        docker.remove_container(cont_name)
         .await
         .spinner_result(&spinner)?;
 
@@ -83,7 +112,6 @@ pub async fn build_image(
     }
     .await
     .progress_result(&progress)?;
-
     Ok(())
 }
 
@@ -167,10 +195,10 @@ async fn repack(
         entrypoint: None,
     };
 
-    docker.create_container(options).await?;
+    //docker.create_container(options).await?;
     progress.inc(1);
 
-    docker.start_container(squashfs_cont).await?;
+    //docker.start_container(squashfs_cont).await?;
     progress.inc(1);
 
     let path_in = "/work/in";
