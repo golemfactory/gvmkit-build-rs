@@ -9,6 +9,10 @@ use futures::TryStreamExt;
 
 use futures_util::StreamExt;
 use std::collections::HashMap;
+use std::fs::{File, OpenOptions};
+use std::io::{BufWriter, Read, Write};
+use std::path::Path;
+use tokio::io::AsyncWriteExt;
 
 #[derive(Debug, Clone)]
 pub struct DirectoryMount {
@@ -105,18 +109,20 @@ impl DockerInstance {
                 if err.to_string().contains("No such image") {
                     // TODO: better way
                     self.create_image(&options.image_name).await?;
-                    self.try_create_container(options).await?;
+                    self.try_create_container(options.clone()).await?;
                 } else {
                     return Err(err);
                 }
             }
         }
+        println!("Created container '{:?}'", options.container_name);
         Ok(())
     }
 
     pub async fn start_container(&mut self, container_name: &str) -> anyhow::Result<()> {
         log::debug!("Starting container '{}'", container_name);
         let options = None::<container::StartContainerOptions<String>>;
+
         self.docker.start_container(container_name, options).await?;
         Ok(())
     }
@@ -197,20 +203,39 @@ impl DockerInstance {
         Ok(())
     }
 
-    pub async fn download(&mut self, container_name: &str, path: &str) -> anyhow::Result<BytesMut> {
+    pub async fn download(&mut self, container_name: &str, path: &str, tar_path: &Path) -> anyhow::Result<()> {
         log::debug!("Downloading '{}' from container '{}'", path, container_name);
 
         let options = container::DownloadFromContainerOptions { path };
-        let bytes = self
+        let mut download_stream = self
             .docker
-            .download_from_container(container_name, Some(options))
-            .try_fold(BytesMut::new(), |mut bytes, b| async move {
-                bytes.put(b);
-                Ok(bytes)
-            })
-            .await?;
+            .download_from_container(container_name, Some(options));
 
-        Ok(bytes)
+
+        //std::fs::FileWriter::new("test.tar").write(download_stream).await;
+
+
+        let mut file = tokio::fs::OpenOptions::new().create(true).write(true).open(tar_path).await?;
+        loop {
+            let mut buf = [0; 1024];
+            match download_stream.next().await {
+                Some(Ok(stream)) => {
+                    file.write_all(&stream).await?;
+                }
+                Some(Err(err)) => {
+                    return Err(anyhow!("Failed to read exec output: {}", err));
+                }
+                None => break,
+            }
+
+        }
+        //std::fs::write("test.tar", download_stream).unwrap();
+
+
+
+
+        Ok(())
+        //Ok(bytes)
     }
 
     pub async fn upload(

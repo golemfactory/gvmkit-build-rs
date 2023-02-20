@@ -4,13 +4,16 @@ use std::{
     io::Write,
     path::{Path, PathBuf},
 };
+use std::fs::{File, OpenOptions};
 
-use crate::docker::{ContainerOptions, DockerInstance};
+use crate::docker::{ContainerOptions, DirectoryMount, DockerInstance};
 use crate::progress::{from_progress_output, Progress, ProgressResult, Spinner, SpinnerResult};
 use crate::rwbuf::RWBuffer;
 use bollard::service::ContainerConfig;
 use crc::{Crc, CRC_32_ISO_HDLC};
 use std::rc::Rc;
+use tokio::io::AsyncReadExt;
+use trust_dns_resolver::IntoName;
 
 pub(crate) const STEPS: usize = 3;
 
@@ -20,6 +23,7 @@ pub async fn build_image(
     env: Vec<String>,
     volumes: Vec<String>,
     entrypoint: Option<String>,
+    tmp_tar_path: &Path,
 ) -> anyhow::Result<()> {
     let spinner = Spinner::new(format!("Downloading '{image_name}'")).ticking();
     let mut docker = DockerInstance::new().await.spinner_err(&spinner)?;
@@ -45,12 +49,13 @@ pub async fn build_image(
 
     let spinner = Spinner::new("Copying image contents".to_string()).ticking();
     let (hash, cfg) = docker.get_config(cont_name).await.spinner_err(&spinner)?;
-    let tar_bytes = docker
-        .download(cont_name, "/")
+    docker
+        .download(cont_name, "/", tmp_tar_path)
         .await
-        .spinner_err(&spinner)?
-        .freeze();
-    let mut tar = tar_from_bytes(&tar_bytes).spinner_err(&spinner)?;
+        .spinner_err(&spinner)?;
+
+    let mut f = OpenOptions::new().append(true).open(tmp_tar_path).unwrap();
+    let mut tar = tar::Builder::new(&mut f);
 
     docker
         .remove_container(cont_name)
@@ -72,7 +77,7 @@ pub async fn build_image(
         fs::create_dir_all(&work_dir_out)?;
 
         add_metadata_inside(&mut tar, &cfg)?;
-        let squashfs_image_path = repack(tar, &mut docker, &work_dir_out, progress_).await?;
+        let squashfs_image_path = repack(tar, &mut docker, &work_dir_out, progress_, tmp_tar_path, work_dir.as_path()).await?;
         add_metadata_outside(&squashfs_image_path, &cfg)?;
 
         fs::rename(&squashfs_image_path, output)?;
@@ -87,7 +92,7 @@ pub async fn build_image(
     Ok(())
 }
 
-fn add_file(tar: &mut tar::Builder<RWBuffer>, path: &Path, data: &[u8]) -> anyhow::Result<()> {
+fn add_file(tar: &mut tar::Builder<&mut File>, path: &Path, data: &[u8]) -> anyhow::Result<()> {
     let mut header = tar::Header::new_ustar();
     header.set_path(path)?;
     header.set_size(data.len() as u64);
@@ -98,7 +103,7 @@ fn add_file(tar: &mut tar::Builder<RWBuffer>, path: &Path, data: &[u8]) -> anyho
 }
 
 fn add_meta_file(
-    tar: &mut tar::Builder<RWBuffer>,
+    tar: &mut tar::Builder<&mut File>,
     path: &Path,
     strings: &Option<Vec<String>>,
 ) -> anyhow::Result<()> {
@@ -111,7 +116,7 @@ fn add_meta_file(
 }
 
 fn add_metadata_inside(
-    tar: &mut tar::Builder<RWBuffer>,
+    tar: &mut tar::Builder<&mut File>,
     config: &ContainerConfig,
 ) -> anyhow::Result<()> {
     add_meta_file(tar, Path::new(".env"), &config.env)?;
@@ -144,14 +149,20 @@ fn add_metadata_outside(image_path: &Path, config: &ContainerConfig) -> anyhow::
 }
 
 async fn repack(
-    tar: tar::Builder<RWBuffer>,
+    tar: tar::Builder<&mut File>,
     docker: &mut DockerInstance,
     dir_out: &Path,
     progress: Rc<Progress>,
+    tmp_tar_path: &Path,
+    work_dir: &Path,
 ) -> anyhow::Result<PathBuf> {
     progress.set_total(9 /* local */ + 100 /* mksquashfs percent */);
 
-    let img_as_tar = finish_tar(tar)?;
+    let mut tmptar = tokio::fs::File::open(tmp_tar_path).await?;
+
+    let mut bytes = Vec::new();
+    tmptar.read_to_end(&mut bytes).await?;
+
     progress.inc(1);
 
     let squashfs_image = "prekucki/squashfs-tools:latest";
@@ -160,7 +171,16 @@ async fn repack(
     let options = ContainerOptions {
         image_name: squashfs_image.to_owned(),
         container_name: squashfs_cont.to_owned(),
-        mounts: None,
+        mounts: Some(vec![DirectoryMount {
+            host: r"C:\golem\gvmkit-build-rs\test_vol\in".to_string(),
+            guest: "/work/in".to_string(),
+            readonly: false,
+        },
+            DirectoryMount {
+            host: r"C:\golem\gvmkit-build-rs\test_vol\out".to_string(),
+            guest: "/work/out".to_string(),
+            readonly: false,}
+        ]),
         cmd: Some(start_cmd.iter().map(|s| s.to_string()).collect()),
         env: None,
         volumes: None,
@@ -177,7 +197,7 @@ async fn repack(
     let path_out = "/work/out/image.squashfs";
 
     docker
-        .upload(squashfs_cont, path_in, img_as_tar.bytes.freeze())
+        .upload(squashfs_cont, path_in, bytes.into())
         .await?;
     progress.inc(1);
 
@@ -200,18 +220,19 @@ async fn repack(
         )
         .await?;
 
-    let final_img_tar = docker.download(squashfs_cont, path_out).await?;
+    let tar_path = dir_out.join(Path::new(path_out).file_name().unwrap());
+    let final_img_tar = docker.download(squashfs_cont, path_out, tar_path.as_path()).await?;
     progress.inc(1);
-    let mut tar = tar::Archive::new(RWBuffer::from(final_img_tar));
+    //let mut tar = tar::Archive::new(RWBuffer::from(final_img_tar));
     progress.inc(1);
-    tar.unpack(dir_out)?;
+    //tar.unpack(dir_out)?;
     progress.inc(1);
     docker.stop_container(squashfs_cont).await?;
     progress.inc(1);
     docker.remove_container(squashfs_cont).await?;
     progress.inc(1);
 
-    Ok(dir_out.join(Path::new(path_out).file_name().unwrap()))
+    Ok((tar_path))
 }
 
 fn tar_from_bytes(bytes: &Bytes) -> anyhow::Result<tar::Builder<RWBuffer>> {
@@ -247,6 +268,7 @@ fn tar_from_bytes(bytes: &Bytes) -> anyhow::Result<tar::Builder<RWBuffer>> {
         let entry_size = hdr.entry_size()? as usize;
         offset += 0x200;
         tar.append(hdr, &bytes[offset..offset + entry_size])?;
+        println!("reading tar: Appended entry at offset 0x{:x}", offset);
         offset += entry_size;
         if entry_size > 0 && entry_size % 0x200 != 0 {
             // round up to chunk size

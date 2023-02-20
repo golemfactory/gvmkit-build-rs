@@ -7,6 +7,7 @@ mod rwbuf;
 mod upload;
 
 use std::{env, path::Path};
+use std::path::PathBuf;
 use structopt::StructOpt;
 
 const INTERNAL_LOG_LEVEL: &str = "hyper=warn,bollard=warn";
@@ -41,6 +42,11 @@ async fn main() -> anyhow::Result<()> {
     env::set_var(env_logger::DEFAULT_FILTER_ENV, log_filter);
     env_logger::init();
 
+    let mut work_dir = PathBuf::from(&format!("work/in"));
+    tokio::fs::create_dir_all(&work_dir).await?; // path must exist for canonicalize()
+    //work_dir = work_dir.canonicalize()?;
+    println!("Working directory: {}", work_dir.display());
+
     let cmdargs = CmdArgs::from_args();
 
     crate::progress::set_total_steps(if cmdargs.push {
@@ -55,6 +61,7 @@ async fn main() -> anyhow::Result<()> {
         cmdargs.env,
         cmdargs.vol,
         cmdargs.entrypoint,
+        work_dir.join("image.tar").as_path(),
     )
     .await?;
 
