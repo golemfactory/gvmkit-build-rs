@@ -8,7 +8,9 @@ on:
 jobs:
   build:
     name: Build ${{ matrix.target }}
+    continue-on-error: ${{ matrix.experimental == 1 }}
     strategy:
+      fail-fast: false
       matrix:
         include:
           - runs-on: macos-latest
@@ -17,8 +19,9 @@ jobs:
             target: aarch64-apple-darwin
           - runs-on: windows-latest
             target: x86_64-pc-windows-msvc
-          # - runs-on: windows-latest
-          #   target: aarch64-pc-windows-msvc
+          - runs-on: windows-latest
+            target: aarch64-pc-windows-msvc
+            experimental: true
           - runs-on: ubuntu-latest
             target: x86_64-unknown-linux-gnu
           - runs-on: ubuntu-latest
@@ -39,6 +42,13 @@ jobs:
           target: ${{ matrix.target }}
           args: --release --out dist -m Cargo.toml
           manylinux: auto
+      - name: Build wheels (musl)
+        if: contains(matrix.target, 'musl')
+        uses: PyO3/maturin-action@v1
+        with:
+          target: ${{ matrix.target }}
+          args: --release --out dist -m Cargo.toml
+          manylinux: musllinux_1_2
       - name: Install built wheel
         if: "startsWith(matrix.target, 'x86_64')"
         run: |
