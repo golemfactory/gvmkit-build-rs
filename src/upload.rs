@@ -1,5 +1,5 @@
 use crate::progress::{Progress, ProgressResult, Spinner, SpinnerResult};
-use actix_rt::Arbiter;
+
 use anyhow::Context;
 use bytes::Bytes;
 use futures::channel::{mpsc, oneshot};
@@ -7,7 +7,7 @@ use futures::SinkExt;
 use hex::ToHex;
 use sha3::Digest;
 use std::path::Path;
-use std::rc::Rc;
+
 use std::sync::Arc;
 use tokio::io::{AsyncReadExt, BufReader};
 use trust_dns_resolver::config::{ResolverConfig, ResolverOpts};

@@ -10,8 +10,8 @@ use crate::docker::{ContainerOptions, DockerInstance};
 use crate::progress::{from_progress_output, Progress, ProgressResult, Spinner, SpinnerResult};
 use crate::rwbuf::RWBuffer;
 use bollard::service::ContainerConfig;
+use crc::{Crc, CRC_32_ISO_HDLC};
 use std::rc::Rc;
-use crc::{Crc, CRC_32_ISCSI, CRC_32_ISO_HDLC};
 
 pub(crate) const STEPS: usize = 3;
 

@@ -1,6 +1,6 @@
 use indicatif::{ProgressBar, ProgressStyle};
 use regex::Regex;
-use serde::de::Unexpected::Str;
+
 use std::borrow::Cow;
 use std::cell::RefCell;
 use std::fmt::Debug;

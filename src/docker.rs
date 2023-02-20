@@ -6,9 +6,9 @@ use bollard::{
 };
 use bytes::{BufMut, Bytes, BytesMut};
 use futures::TryStreamExt;
-use serde_json::to_vec;
-use std::collections::HashMap;
+
 use futures_util::StreamExt;
+use std::collections::HashMap;
 
 #[derive(Debug, Clone)]
 pub struct DirectoryMount {
@@ -149,28 +149,24 @@ impl DockerInstance {
             )
             .await
         {
-            Ok(start_exec_results) => {
-                match start_exec_results {
-                    exec::StartExecResults::Attached { mut output, input } => {
-                        while true {
-                            match output.next().await {
-                                Some(Ok(stream)) => {
-                                    log::info!("Output: {}", stream.to_string());
-                                    on_output(stream.to_string());
-                                }
-                                Some(Err(err)) => {
-                                    return Err(anyhow!("Failed to read exec output: {}", err));
-                                }
-                                None =>
-                                    break
-                                    ,
-                            }
-
+            Ok(start_exec_results) => match start_exec_results {
+                exec::StartExecResults::Attached {
+                    mut output,
+                    input: _,
+                } => loop {
+                    match output.next().await {
+                        Some(Ok(stream)) => {
+                            log::info!("Output: {}", stream.to_string());
+                            on_output(stream.to_string());
                         }
+                        Some(Err(err)) => {
+                            return Err(anyhow!("Failed to read exec output: {}", err));
+                        }
+                        None => break,
                     }
-                    exec::StartExecResults::Detached => (),
-                }
-            }
+                },
+                exec::StartExecResults::Detached => (),
+            },
             Err(err) => {
                 return Err(anyhow!("Failed to start exec: {}", err));
             }
