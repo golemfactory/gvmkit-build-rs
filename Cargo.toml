@@ -1,5 +1,5 @@
 [package]
-name = "gvmkit"
+name = "gvmkit-build"
 version = "0.1.0"
 authors = ["Golem Factory <contact@golem.network>"]
 edition = "2018"
@@ -27,3 +27,6 @@ structopt = "0.3"
 tar = "0.4"
 tokio = { version = "0.2", features = ["macros"] }
 trust-dns-resolver = { version = "0.19", features = ["mdns"] }
+
+[package.metadata.maturin]
+name = "gvmkit-build"
