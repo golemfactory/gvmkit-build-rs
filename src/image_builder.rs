@@ -1,5 +1,4 @@
 use bytes::Bytes;
-use crc::crc32;
 use std::{
     fs,
     io::Write,
@@ -12,6 +11,7 @@ use crate::progress::{from_progress_output, Progress, ProgressResult, Spinner, S
 use crate::rwbuf::RWBuffer;
 use bollard::service::ContainerConfig;
 use std::rc::Rc;
+use crc::{Crc, CRC_32_ISCSI, CRC_32_ISO_HDLC};
 
 pub(crate) const STEPS: usize = 3;
 
@@ -131,8 +131,13 @@ fn add_metadata_outside(image_path: &Path, config: &ContainerConfig) -> anyhow::
     serde_json::to_writer(&mut json_buf, config)?;
     let mut file = fs::OpenOptions::new().append(true).open(image_path)?;
     let meta_size = json_buf.bytes.len();
-    let crc = crc32::checksum_ieee(&json_buf.bytes);
-    log::debug!("Image metadata checksum: 0x{:x}", crc);
+    let crc = {
+        //CRC_32_ISO_HDLC is another name of CRC-32-IEEE which was used in previous version of crc
+        let crc_algo = Crc::<u32>::new(&CRC_32_ISO_HDLC);
+        let mut digest = crc_algo.digest();
+        digest.update(&json_buf.bytes);
+        digest.finalize()
+    };
     file.write(&crc.to_le_bytes())?;
     file.write(&json_buf.bytes)?;
     file.write(format!("{:08}", meta_size).as_bytes())?;
