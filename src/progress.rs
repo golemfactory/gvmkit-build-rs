@@ -1,12 +1,12 @@
-use std::borrow::Cow;
 use indicatif::{ProgressBar, ProgressStyle};
 use regex::Regex;
+use serde::de::Unexpected::Str;
+use std::borrow::Cow;
 use std::cell::RefCell;
 use std::fmt::Debug;
 use std::sync::atomic::{AtomicUsize, Ordering::Relaxed};
 use std::sync::Mutex;
 use std::time::Duration;
-use serde::de::Unexpected::Str;
 
 const PROGRESS_SIMPLE: &'static str =
     "{spinner:.white} {prefix:.bold.dim} {msg} [{elapsed_precise}] [{bar:40.grey}] {percent}%";
@@ -145,12 +145,13 @@ impl Spinner {
 
         Spinner {
             inner,
-            message: RefCell::new(msg)
+            message: RefCell::new(msg),
         }
     }
 
     pub fn ticking(self) -> Self {
-        self.inner.enable_steady_tick(Duration::from_millis(REFRESH_MS));
+        self.inner
+            .enable_steady_tick(Duration::from_millis(REFRESH_MS));
         self
     }
 
