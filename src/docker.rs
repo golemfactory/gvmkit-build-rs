@@ -121,7 +121,7 @@ impl DockerInstance {
         Ok(())
     }
 
-    pub async fn run_command<F: Fn(String) -> ()>(
+    pub async fn run_command<F: Fn(String)>(
         &mut self,
         container_name: &str,
         cmd: Vec<&str>,

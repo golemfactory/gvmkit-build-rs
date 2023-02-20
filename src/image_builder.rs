@@ -4,7 +4,6 @@ use std::{
     io::Write,
     path::{Path, PathBuf},
 };
-use tar;
 
 use crate::docker::{ContainerOptions, DockerInstance};
 use crate::progress::{from_progress_output, Progress, ProgressResult, Spinner, SpinnerResult};
@@ -22,7 +21,7 @@ pub async fn build_image(
     volumes: Vec<String>,
     entrypoint: Option<String>,
 ) -> anyhow::Result<()> {
-    let spinner = Spinner::new(format!("Downloading '{}'", image_name)).ticking();
+    let spinner = Spinner::new(format!("Downloading '{image_name}'")).ticking();
     let mut docker = DockerInstance::new().await.spinner_err(&spinner)?;
     let cont_name = "gvmkit-tmp";
     let options = ContainerOptions {
@@ -65,7 +64,7 @@ pub async fn build_image(
     let progress_ = progress.clone();
 
     async move {
-        let mut work_dir = PathBuf::from(&format!("work-{}", hash));
+        let mut work_dir = PathBuf::from(&format!("work-{hash}"));
         fs::create_dir_all(&work_dir)?; // path must exist for canonicalize()
         work_dir = work_dir.canonicalize()?;
 
@@ -138,9 +137,9 @@ fn add_metadata_outside(image_path: &Path, config: &ContainerConfig) -> anyhow::
         digest.update(&json_buf.bytes);
         digest.finalize()
     };
-    file.write(&crc.to_le_bytes())?;
-    file.write(&json_buf.bytes)?;
-    file.write(format!("{:08}", meta_size).as_bytes())?;
+    let mut _bytes_written = file.write(&crc.to_le_bytes())?;
+    _bytes_written += file.write(&json_buf.bytes)?;
+    _bytes_written += file.write(format!("{meta_size:08}").as_bytes())?;
     Ok(())
 }
 
@@ -185,7 +184,7 @@ async fn repack(
     let pre_run_progress = progress.position();
     let on_output = |s: String| {
         for s in s.split('\n').filter(|s| s.trim_end().ends_with('%')) {
-            if let Some(v) = from_progress_output(&s) {
+            if let Some(v) = from_progress_output(s) {
                 let delta = v as u64 - (progress.position() - pre_run_progress);
                 progress.inc(delta);
             }
@@ -247,8 +246,8 @@ fn tar_from_bytes(bytes: &Bytes) -> anyhow::Result<tar::Builder<RWBuffer>> {
         let hdr = tar::Header::from_byte_slice(&bytes[offset..offset + 0x200]);
         let entry_size = hdr.entry_size()? as usize;
         offset += 0x200;
-        tar.append(&hdr, &bytes[offset..offset + entry_size])?;
-        offset = offset + entry_size;
+        tar.append(hdr, &bytes[offset..offset + entry_size])?;
+        offset += entry_size;
         if entry_size > 0 && entry_size % 0x200 != 0 {
             // round up to chunk size
             offset |= 0x1ff;

@@ -14,20 +14,20 @@ use trust_dns_resolver::config::{ResolverConfig, ResolverOpts};
 use trust_dns_resolver::TokioAsyncResolver;
 
 pub(crate) const STEPS: usize = 2;
-const PROTOCOL: &'static str = "http";
-const DOMAIN: &'static str = "dev.golem.network";
+const PROTOCOL: &str = "http";
+const DOMAIN: &str = "dev.golem.network";
 
 async fn resolve_repo() -> anyhow::Result<String> {
     let resolver: TokioAsyncResolver =
         TokioAsyncResolver::tokio(ResolverConfig::google(), ResolverOpts::default())?;
 
     let lookup = resolver
-        .srv_lookup(format!("_girepo._tcp.{}", DOMAIN))
+        .srv_lookup(format!("_girepo._tcp.{DOMAIN}"))
         .await?;
     let srv = lookup
         .iter()
         .next()
-        .ok_or_else(|| anyhow::anyhow!("Repository SRV record not found at {}", DOMAIN))?;
+        .ok_or_else(|| anyhow::anyhow!("Repository SRV record not found at {DOMAIN}"))?;
     let base_url = format!(
         "{}://{}:{}",
         PROTOCOL,
@@ -37,7 +37,7 @@ async fn resolve_repo() -> anyhow::Result<String> {
 
     let client = awc::Client::new();
     let response = client
-        .get(format!("{}/status", base_url))
+        .get(format!("{base_url}/status"))
         .send()
         .await
         .map_err(|e| anyhow::anyhow!("Repository status check failed: {}", e))?;
@@ -107,22 +107,22 @@ pub async fn upload_image<P: AsRef<Path>>(file_path: P) -> anyhow::Result<()> {
 
     let client = awc::Client::builder().disable_timeout().finish();
     client
-        .put(format!("{}/upload/{}", repo_url, file_name))
+        .put(format!("{repo_url}/upload/{file_name}"))
         .send_stream(rx)
         .await
         .map_err(|e| anyhow::anyhow!("Image upload error: {}", e))
         .progress_result(&progress)?;
 
     let hash: String = hrx.await?;
-    let bytes = format!("{}/{}", repo_url, file_name).as_bytes().to_vec();
-    let spinner = Spinner::new(format!("Uploading link for {}", file_name)).ticking();
+    let bytes = format!("{repo_url}/{file_name}").as_bytes().to_vec();
+    let spinner = Spinner::new(format!("Uploading link for {file_name}")).ticking();
     client
-        .put(format!("{}/upload/image.{}.link", repo_url, hash))
+        .put(format!("{repo_url}/upload/image.{hash}.link"))
         .send_body(bytes)
         .await
-        .map_err(|e| anyhow::anyhow!("Image descriptor upload error: {}", e))
+        .map_err(|e| anyhow::anyhow!("Image descriptor upload error: {e}"))
         .spinner_result(&spinner)?;
 
-    println!("{}", hash);
+    println!("{hash}");
     Ok(())
 }
