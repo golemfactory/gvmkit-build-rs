@@ -1,9 +1,12 @@
+use std::borrow::Cow;
 use indicatif::{ProgressBar, ProgressStyle};
 use regex::Regex;
 use std::cell::RefCell;
 use std::fmt::Debug;
 use std::sync::atomic::{AtomicUsize, Ordering::Relaxed};
 use std::sync::Mutex;
+use std::time::Duration;
+use serde::de::Unexpected::Str;
 
 const PROGRESS_SIMPLE: &'static str =
     "{spinner:.white} {prefix:.bold.dim} {msg} [{elapsed_precise}] [{bar:40.grey}] {percent}%";
@@ -28,31 +31,31 @@ static STEP_COUNTER: AtomicUsize = AtomicUsize::new(1);
 lazy_static::lazy_static! {
     static ref PROGRESS_SIMPLE_STYLE: ProgressStyle = ProgressStyle::default_bar()
         .tick_strings(SPINNER_TICKS)
-        .template(PROGRESS_SIMPLE);
+        .template(PROGRESS_SIMPLE).unwrap();
 
     static ref PROGRESS_ETA_STYLE: ProgressStyle = ProgressStyle::default_bar()
         .tick_strings(SPINNER_TICKS)
-        .template(PROGRESS_ETA);
+        .template(PROGRESS_ETA).unwrap();
 
     static ref PROGRESS_OK_STYLE: ProgressStyle = ProgressStyle::default_bar()
         .tick_strings(OK_TICK)
-        .template(PROGRESS_OK);
+        .template(PROGRESS_OK).unwrap();
 
     static ref PROGRESS_ERR_STYLE: ProgressStyle = ProgressStyle::default_bar()
         .tick_strings(ERR_TICK)
-        .template(PROGRESS_ERR);
+        .template(PROGRESS_ERR).unwrap();
 
     static ref SPINNER_STYLE: ProgressStyle = ProgressStyle::default_spinner()
             .tick_strings(SPINNER_TICKS)
-            .template(SPINNER.clone());
+            .template(SPINNER.clone()).unwrap();
 
     static ref SPINNER_OK_STYLE: ProgressStyle = ProgressStyle::default_spinner()
             .tick_strings(OK_TICK)
-            .template(SPINNER_OK.clone());
+            .template(SPINNER_OK.clone()).unwrap();
 
     static ref SPINNER_ERR_STYLE: ProgressStyle = ProgressStyle::default_spinner()
             .tick_strings(ERR_TICK)
-            .template(SPINNER_ERR.clone());
+            .template(SPINNER_ERR.clone()).unwrap();
 
     static ref TOTAL_STEPS: Mutex<usize> = Mutex::new(0);
     static ref PERCENT_REGEX: Regex = Regex::new(r"\d+%").unwrap();
@@ -75,7 +78,7 @@ pub(crate) struct Progress {
 }
 
 impl Progress {
-    pub fn new<S: AsRef<str>>(msg: S, total: u64) -> Self {
+    pub fn new(msg: impl Into<Cow<'static, str>>, total: u64) -> Self {
         let prefix = format!(
             "[{}/{}]",
             STEP_COUNTER.fetch_add(1, Relaxed),
@@ -83,14 +86,14 @@ impl Progress {
         );
 
         let inner = ProgressBar::new(total).with_style(PROGRESS_SIMPLE_STYLE.clone());
-        inner.set_prefix(prefix.as_str());
-        inner.set_message(msg.as_ref());
-        inner.enable_steady_tick(REFRESH_MS);
+        inner.set_prefix(prefix);
+        inner.set_message(msg);
+        inner.enable_steady_tick(Duration::from_millis(REFRESH_MS));
 
         Progress { inner }
     }
 
-    pub fn with_eta<S: AsRef<str>>(msg: S, total: u64) -> Self {
+    pub fn with_eta(msg: impl Into<Cow<'static, str>>, total: u64) -> Self {
         let progress = Self::new(msg, total);
         progress.inner.set_style(PROGRESS_ETA_STYLE.clone());
         progress
@@ -108,8 +111,8 @@ impl Progress {
         self.inner.set_length(total);
     }
 
-    pub fn set_message<S: AsRef<str>>(&self, msg: S) {
-        self.inner.set_message(msg.as_ref());
+    pub fn set_message(&self, msg: impl Into<Cow<'static, str>>) {
+        self.inner.set_message(msg);
     }
 
     pub fn success(&self) {
@@ -129,7 +132,7 @@ pub(crate) struct Spinner {
 }
 
 impl Spinner {
-    pub fn new<S: AsRef<str>>(msg: S) -> Self {
+    pub fn new(msg: String) -> Self {
         let prefix = format!(
             "[{}/{}]",
             STEP_COUNTER.fetch_add(1, Relaxed),
@@ -137,17 +140,17 @@ impl Spinner {
         );
 
         let inner = ProgressBar::new(!0).with_style(SPINNER_STYLE.clone());
-        inner.set_prefix(prefix.as_str());
-        inner.set_message(msg.as_ref());
+        inner.set_prefix(prefix);
+        inner.set_message(msg.clone());
 
         Spinner {
             inner,
-            message: RefCell::new(msg.as_ref().to_string()),
+            message: RefCell::new(msg)
         }
     }
 
     pub fn ticking(self) -> Self {
-        self.inner.enable_steady_tick(REFRESH_MS);
+        self.inner.enable_steady_tick(Duration::from_millis(REFRESH_MS));
         self
     }
 
@@ -155,9 +158,9 @@ impl Spinner {
         self.message.borrow().clone()
     }
 
-    pub fn set_message<S: AsRef<str>>(&self, msg: S) {
-        self.message.replace(msg.as_ref().to_string());
-        self.inner.set_message(msg.as_ref());
+    pub fn set_message(&self, msg: String) {
+        self.message.replace(msg.clone());
+        self.inner.set_message(msg);
     }
 
     pub fn success(&self) {

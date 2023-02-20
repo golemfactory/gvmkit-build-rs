@@ -6,6 +6,7 @@ use bollard::{
 };
 use bytes::{BufMut, Bytes, BytesMut};
 use futures::TryStreamExt;
+use serde_json::to_vec;
 use std::collections::HashMap;
 
 #[derive(Debug, Clone)]
@@ -53,6 +54,7 @@ impl DockerInstance {
 
     pub async fn try_create_container(&mut self, options: ContainerOptions) -> anyhow::Result<()> {
         let create_options = container::CreateContainerOptions {
+            platform: Some("linux/amd64".to_owned()),
             name: options.container_name,
         };
 
@@ -135,16 +137,13 @@ impl DockerInstance {
         };
 
         let result = self.docker.create_exec(container_name, config).await?;
-        self.docker
-            .start_exec(&result.id, Some(exec::StartExecOptions { detach: false }))
-            .try_for_each(|results| async {
-                match results {
-                    exec::StartExecResults::Attached { log } => on_output(log.to_string()),
-                    exec::StartExecResults::Detached => (),
-                }
-                Ok(())
-            })
-            .await?;
+        self.docker.start_exec(
+            &result.id,
+            Some(exec::StartExecOptions {
+                detach: false,
+                output_capacity: None,
+            }),
+        );
         Ok(())
     }
 

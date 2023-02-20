@@ -8,6 +8,7 @@ use hex::ToHex;
 use sha3::Digest;
 use std::path::Path;
 use std::rc::Rc;
+use std::sync::Arc;
 use tokio::io::{AsyncReadExt, BufReader};
 use trust_dns_resolver::config::{ResolverConfig, ResolverOpts};
 use trust_dns_resolver::TokioAsyncResolver;
@@ -18,7 +19,7 @@ const DOMAIN: &'static str = "dev.golem.network";
 
 async fn resolve_repo() -> anyhow::Result<String> {
     let resolver: TokioAsyncResolver =
-        TokioAsyncResolver::tokio(ResolverConfig::google(), ResolverOpts::default()).await?;
+        TokioAsyncResolver::tokio(ResolverConfig::google(), ResolverOpts::default())?;
 
     let lookup = resolver
         .srv_lookup(format!("_girepo._tcp.{}", DOMAIN))
@@ -52,7 +53,7 @@ async fn resolve_repo() -> anyhow::Result<String> {
 
 pub async fn upload_image<P: AsRef<Path>>(file_path: P) -> anyhow::Result<()> {
     let file_path = file_path.as_ref();
-    let progress = Rc::new(Progress::with_eta(
+    let progress = Arc::new(Progress::with_eta(
         format!("Uploading '{}'", file_path.display()),
         0,
     ));
@@ -83,7 +84,7 @@ pub async fn upload_image<P: AsRef<Path>>(file_path: P) -> anyhow::Result<()> {
     let (htx, hrx) = oneshot::channel();
 
     let progress_ = progress.clone();
-    Arbiter::spawn(async move {
+    tokio::spawn(async move {
         let mut buf = [0; 1024 * 64];
         let mut reader = BufReader::new(file);
         let mut hasher = sha3::Sha3_224::new();

@@ -1,3 +1,5 @@
+extern crate core;
+
 mod docker;
 mod image_builder;
 mod progress;
