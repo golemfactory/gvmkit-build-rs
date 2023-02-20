@@ -6,6 +6,8 @@ use bollard::{
 };
 use bytes::{BufMut, Bytes, BytesMut};
 use futures::TryStreamExt;
+
+use futures_util::StreamExt;
 use std::collections::HashMap;
 
 #[derive(Debug, Clone)]
@@ -53,6 +55,7 @@ impl DockerInstance {
 
     pub async fn try_create_container(&mut self, options: ContainerOptions) -> anyhow::Result<()> {
         let create_options = container::CreateContainerOptions {
+            platform: Some("linux/amd64".to_owned()),
             name: options.container_name,
         };
 
@@ -118,7 +121,7 @@ impl DockerInstance {
         Ok(())
     }
 
-    pub async fn run_command<F: Fn(String) -> ()>(
+    pub async fn run_command<F: Fn(String)>(
         &mut self,
         container_name: &str,
         cmd: Vec<&str>,
@@ -135,16 +138,40 @@ impl DockerInstance {
         };
 
         let result = self.docker.create_exec(container_name, config).await?;
-        self.docker
-            .start_exec(&result.id, Some(exec::StartExecOptions { detach: false }))
-            .try_for_each(|results| async {
-                match results {
-                    exec::StartExecResults::Attached { log } => on_output(log.to_string()),
-                    exec::StartExecResults::Detached => (),
-                }
-                Ok(())
-            })
-            .await?;
+        match self
+            .docker
+            .start_exec(
+                &result.id,
+                Some(exec::StartExecOptions {
+                    detach: false,
+                    output_capacity: None,
+                }),
+            )
+            .await
+        {
+            Ok(start_exec_results) => match start_exec_results {
+                exec::StartExecResults::Attached {
+                    mut output,
+                    input: _,
+                } => loop {
+                    match output.next().await {
+                        Some(Ok(stream)) => {
+                            log::info!("Output: {}", stream.to_string());
+                            on_output(stream.to_string());
+                        }
+                        Some(Err(err)) => {
+                            return Err(anyhow!("Failed to read exec output: {}", err));
+                        }
+                        None => break,
+                    }
+                },
+                exec::StartExecResults::Detached => (),
+            },
+            Err(err) => {
+                return Err(anyhow!("Failed to start exec: {}", err));
+            }
+        }
+
         Ok(())
     }
 

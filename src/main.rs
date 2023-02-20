@@ -1,3 +1,5 @@
+extern crate core;
+
 mod docker;
 mod image_builder;
 mod progress;
@@ -32,10 +34,10 @@ struct CmdArgs {
     image_name: String, // positional
 }
 
-#[actix_rt::main]
+#[tokio::main]
 async fn main() -> anyhow::Result<()> {
     let log_level = env::var(env_logger::DEFAULT_FILTER_ENV).unwrap_or(DEFAULT_LOG_LEVEL.into());
-    let log_filter = format!("{},{}", INTERNAL_LOG_LEVEL, log_level);
+    let log_filter = format!("{INTERNAL_LOG_LEVEL},{log_level}");
     env::set_var(env_logger::DEFAULT_FILTER_ENV, log_filter);
     env_logger::init();
 
