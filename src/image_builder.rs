@@ -1,16 +1,15 @@
 use bytes::Bytes;
-use crc::crc32;
 use std::{
     fs,
     io::Write,
     path::{Path, PathBuf},
 };
-use tar;
 
 use crate::docker::{ContainerOptions, DockerInstance};
 use crate::progress::{from_progress_output, Progress, ProgressResult, Spinner, SpinnerResult};
 use crate::rwbuf::RWBuffer;
 use bollard::service::ContainerConfig;
+use crc::{Crc, CRC_32_ISO_HDLC};
 use std::rc::Rc;
 
 pub(crate) const STEPS: usize = 3;
@@ -22,7 +21,7 @@ pub async fn build_image(
     volumes: Vec<String>,
     entrypoint: Option<String>,
 ) -> anyhow::Result<()> {
-    let spinner = Spinner::new(format!("Downloading '{}'", image_name)).ticking();
+    let spinner = Spinner::new(format!("Downloading '{image_name}'")).ticking();
     let mut docker = DockerInstance::new().await.spinner_err(&spinner)?;
     let cont_name = "gvmkit-tmp";
     let options = ContainerOptions {
@@ -44,7 +43,7 @@ pub async fn build_image(
         .await
         .spinner_result(&spinner)?;
 
-    let spinner = Spinner::new("Copying image contents").ticking();
+    let spinner = Spinner::new("Copying image contents".to_string()).ticking();
     let (hash, cfg) = docker.get_config(cont_name).await.spinner_err(&spinner)?;
     let tar_bytes = docker
         .download(cont_name, "/")
@@ -65,7 +64,7 @@ pub async fn build_image(
     let progress_ = progress.clone();
 
     async move {
-        let mut work_dir = PathBuf::from(&format!("work-{}", hash));
+        let mut work_dir = PathBuf::from(&format!("work-{hash}"));
         fs::create_dir_all(&work_dir)?; // path must exist for canonicalize()
         work_dir = work_dir.canonicalize()?;
 
@@ -131,11 +130,16 @@ fn add_metadata_outside(image_path: &Path, config: &ContainerConfig) -> anyhow::
     serde_json::to_writer(&mut json_buf, config)?;
     let mut file = fs::OpenOptions::new().append(true).open(image_path)?;
     let meta_size = json_buf.bytes.len();
-    let crc = crc32::checksum_ieee(&json_buf.bytes);
-    log::debug!("Image metadata checksum: 0x{:x}", crc);
-    file.write(&crc.to_le_bytes())?;
-    file.write(&json_buf.bytes)?;
-    file.write(format!("{:08}", meta_size).as_bytes())?;
+    let crc = {
+        //CRC_32_ISO_HDLC is another name of CRC-32-IEEE which was used in previous version of crc
+        let crc_algo = Crc::<u32>::new(&CRC_32_ISO_HDLC);
+        let mut digest = crc_algo.digest();
+        digest.update(&json_buf.bytes);
+        digest.finalize()
+    };
+    let mut _bytes_written = file.write(&crc.to_le_bytes())?;
+    _bytes_written += file.write(&json_buf.bytes)?;
+    _bytes_written += file.write(format!("{meta_size:08}").as_bytes())?;
     Ok(())
 }
 
@@ -180,7 +184,7 @@ async fn repack(
     let pre_run_progress = progress.position();
     let on_output = |s: String| {
         for s in s.split('\n').filter(|s| s.trim_end().ends_with('%')) {
-            if let Some(v) = from_progress_output(&s) {
+            if let Some(v) = from_progress_output(s) {
                 let delta = v as u64 - (progress.position() - pre_run_progress);
                 progress.inc(delta);
             }
@@ -242,8 +246,8 @@ fn tar_from_bytes(bytes: &Bytes) -> anyhow::Result<tar::Builder<RWBuffer>> {
         let hdr = tar::Header::from_byte_slice(&bytes[offset..offset + 0x200]);
         let entry_size = hdr.entry_size()? as usize;
         offset += 0x200;
-        tar.append(&hdr, &bytes[offset..offset + entry_size])?;
-        offset = offset + entry_size;
+        tar.append(hdr, &bytes[offset..offset + entry_size])?;
+        offset += entry_size;
         if entry_size > 0 && entry_size % 0x200 != 0 {
             // round up to chunk size
             offset |= 0x1ff;
