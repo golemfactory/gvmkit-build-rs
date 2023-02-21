@@ -8,28 +8,28 @@ use std::{
 use crate::docker::{ContainerOptions, DockerInstance};
 use crate::progress::{from_progress_output, Progress, ProgressResult, Spinner, SpinnerResult};
 use crate::rwbuf::RWBuffer;
-use bollard::service::ContainerConfig;
-use crc::{Crc, CRC_32_ISO_HDLC};
-use std::rc::Rc;
 use awc::error::SendRequestError::Http;
 use bollard::container;
 use bollard::container::UploadToContainerOptions;
+use bollard::service::ContainerConfig;
+use crc::{Crc, CRC_32_ISO_HDLC};
+use std::rc::Rc;
 
-pub(crate) const STEPS: usize = 3;
+pub(crate) const STEPS: usize = 4;
 
-pub async fn build_image(
+pub async fn build_image_int(
+    docker: &mut DockerInstance,
     image_name: &str,
     output: &Path,
     env: Vec<String>,
     volumes: Vec<String>,
     entrypoint: Option<String>,
+    source_container_name: &str,
+    squash_fs_container_name: &str,
 ) -> anyhow::Result<()> {
-    let spinner = Spinner::new(format!("Downloading '{image_name}'")).ticking();
-    let mut docker = DockerInstance::new().await.spinner_err(&spinner)?;
-    let cont_name = "gvmkit-tmp";
     let options = ContainerOptions {
         image_name: image_name.to_owned(),
-        container_name: cont_name.to_owned(),
+        container_name: source_container_name.to_owned(),
         mounts: None,
         cmd: None,
         env: if env.is_empty() { None } else { Some(env) },
@@ -41,25 +41,34 @@ pub async fn build_image(
         entrypoint: entrypoint.map(|e| vec![e]),
     };
 
+    let spinner = Spinner::new(format!("Starting '{image_name}'")).ticking();
     docker
         .create_container(options)
         .await
         .spinner_result(&spinner)?;
-    docker.start_container(cont_name).await.spinner_result(&spinner)?; // TODO: remove this (it's just for testing
+    docker
+        .start_container(source_container_name)
+        .await
+        .spinner_result(&spinner)?;
 
     let spinner = Spinner::new("Copying image contents".to_string()).ticking();
-    let (hash, cfg) = docker.get_config(cont_name).await.spinner_err(&spinner)?;
+    let (hash, cfg) = docker
+        .get_config(source_container_name)
+        .await
+        .spinner_err(&spinner)?;
 
-    let options = container::DownloadFromContainerOptions { path: "/".to_owned() };
-    let mut stream_in = docker.docker.download_from_container(cont_name, Some(options));
-
+    let options = container::DownloadFromContainerOptions {
+        path: "/".to_owned(),
+    };
+    let mut stream_in = docker
+        .docker
+        .download_from_container(source_container_name, Some(options));
 
     let squashfs_image = "prekucki/squashfs-tools:latest";
-    let squashfs_cont = "sqfs-tools";
     let start_cmd = vec!["tail", "-f", "/dev/null"]; // prevent container from exiting
     let options = ContainerOptions {
         image_name: squashfs_image.to_owned(),
-        container_name: squashfs_cont.to_owned(),
+        container_name: squash_fs_container_name.to_owned(),
         mounts: None,
         cmd: Some(start_cmd.iter().map(|s| s.to_string()).collect()),
         env: None,
@@ -67,24 +76,20 @@ pub async fn build_image(
         entrypoint: None,
     };
     docker.create_container(options).await?;
-    docker.start_container(squashfs_cont).await?;
+    docker.start_container(squash_fs_container_name).await?;
     let opt = UploadToContainerOptions {
         path: "/work/in".to_owned(),
         no_overwrite_dir_non_dir: "1".to_string(),
     };
     let body = hyper::Body::wrap_stream(stream_in);
-    let upload_stream = docker.docker.upload_to_container(squashfs_cont, Some(opt), body);
+    let upload_stream =
+        docker
+            .docker
+            .upload_to_container(squash_fs_container_name, Some(opt), body);
     let res = upload_stream.await?;
     println!("res: {:?}", res);
 
     let mut tar = tar::Builder::new(RWBuffer::new());
-
-    docker
-        .stop_container(cont_name).await.spinner_result(&spinner)?;
-
-        docker.remove_container(cont_name)
-        .await
-        .spinner_result(&spinner)?;
 
     let progress = Rc::new(Progress::new(
         format!("Building  '{}'", output.display()),
@@ -101,7 +106,14 @@ pub async fn build_image(
         fs::create_dir_all(&work_dir_out)?;
 
         add_metadata_inside(&mut tar, &cfg)?;
-        let squashfs_image_path = repack(tar, &mut docker, &work_dir_out, progress_).await?;
+        let squashfs_image_path = repack(
+            tar,
+            docker,
+            &work_dir_out,
+            progress_,
+            squash_fs_container_name,
+        )
+        .await?;
         add_metadata_outside(&squashfs_image_path, &cfg)?;
 
         fs::rename(&squashfs_image_path, output)?;
@@ -112,6 +124,46 @@ pub async fn build_image(
     }
     .await
     .progress_result(&progress)?;
+    Ok(())
+}
+
+pub async fn build_image(
+    image_name: &str,
+    output: &Path,
+    env: Vec<String>,
+    volumes: Vec<String>,
+    entrypoint: Option<String>,
+) -> anyhow::Result<()> {
+    let spinner = Spinner::new(format!("Downloading '{image_name}'")).ticking();
+    let mut docker = DockerInstance::new().await.spinner_err(&spinner)?;
+    let source_container_name = "source";
+    let squash_fs_container_name = "squashfs";
+
+    tokio::select! {
+        _ = build_image_int(&mut docker, image_name, output, env, volumes, entrypoint, source_container_name, squash_fs_container_name) => {
+        },
+        _ = tokio::signal::ctrl_c() => {
+            println!("Kill signal received");
+        },
+    };
+
+    let spinner = Spinner::new(format!("Stopping containers and cleanup")).ticking();
+    docker
+        .stop_container(source_container_name)
+        .await
+        .spinner_result(&spinner)?;
+    docker
+        .remove_container(source_container_name)
+        .await
+        .spinner_result(&spinner)?;
+    docker
+        .stop_container(squash_fs_container_name)
+        .await
+        .spinner_result(&spinner)?;
+    docker
+        .remove_container(squash_fs_container_name)
+        .await
+        .spinner_result(&spinner)?;
     Ok(())
 }
 
@@ -176,36 +228,18 @@ async fn repack(
     docker: &mut DockerInstance,
     dir_out: &Path,
     progress: Rc<Progress>,
+    squash_fs_container_name: &str,
 ) -> anyhow::Result<PathBuf> {
     progress.set_total(9 /* local */ + 100 /* mksquashfs percent */);
 
     let img_as_tar = finish_tar(tar)?;
     progress.inc(1);
 
-    let squashfs_image = "prekucki/squashfs-tools:latest";
-    let squashfs_cont = "sqfs-tools";
-    let start_cmd = vec!["tail", "-f", "/dev/null"]; // prevent container from exiting
-    let options = ContainerOptions {
-        image_name: squashfs_image.to_owned(),
-        container_name: squashfs_cont.to_owned(),
-        mounts: None,
-        cmd: Some(start_cmd.iter().map(|s| s.to_string()).collect()),
-        env: None,
-        volumes: None,
-        entrypoint: None,
-    };
-
-    //docker.create_container(options).await?;
-    progress.inc(1);
-
-    //docker.start_container(squashfs_cont).await?;
-    progress.inc(1);
-
     let path_in = "/work/in";
     let path_out = "/work/out/image.squashfs";
 
     docker
-        .upload(squashfs_cont, path_in, img_as_tar.bytes.freeze())
+        .upload(squash_fs_container_name, path_in, img_as_tar.bytes.freeze())
         .await?;
     progress.inc(1);
 
@@ -221,22 +255,18 @@ async fn repack(
 
     docker
         .run_command(
-            squashfs_cont,
+            squash_fs_container_name,
             vec!["mksquashfs", path_in, path_out, "-comp", "lzo", "-noappend"],
             "/",
             on_output,
         )
         .await?;
 
-    let final_img_tar = docker.download(squashfs_cont, path_out).await?;
+    let final_img_tar = docker.download(squash_fs_container_name, path_out).await?;
     progress.inc(1);
     let mut tar = tar::Archive::new(RWBuffer::from(final_img_tar));
     progress.inc(1);
     tar.unpack(dir_out)?;
-    progress.inc(1);
-    docker.stop_container(squashfs_cont).await?;
-    progress.inc(1);
-    docker.remove_container(squashfs_cont).await?;
     progress.inc(1);
 
     Ok(dir_out.join(Path::new(path_out).file_name().unwrap()))

@@ -34,7 +34,7 @@ struct CmdArgs {
     image_name: String, // positional
 }
 
-#[tokio::main]
+#[tokio::main(flavor = "current_thread")]
 async fn main() -> anyhow::Result<()> {
     let log_level = env::var(env_logger::DEFAULT_FILTER_ENV).unwrap_or(DEFAULT_LOG_LEVEL.into());
     let log_filter = format!("{INTERNAL_LOG_LEVEL},{log_level}");

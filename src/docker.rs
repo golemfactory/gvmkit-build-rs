@@ -28,6 +28,20 @@ pub struct ContainerOptions {
     pub entrypoint: Option<Vec<String>>,
 }
 
+impl Default for ContainerOptions {
+    fn default() -> Self {
+        ContainerOptions {
+            image_name: "".to_owned(),
+            container_name: "".to_owned(),
+            mounts: None,
+            cmd: None,
+            env: None,
+            volumes: None,
+            entrypoint: None,
+        }
+    }
+}
+
 pub struct DockerInstance {
     pub docker: Docker,
 }
