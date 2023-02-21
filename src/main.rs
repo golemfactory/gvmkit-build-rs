@@ -8,6 +8,7 @@ mod upload;
 
 use std::{env, path::Path};
 use structopt::StructOpt;
+use crate::image_builder::ImageBuilder;
 
 const INTERNAL_LOG_LEVEL: &str = "hyper=warn,bollard=warn";
 const DEFAULT_LOG_LEVEL: &str = "info";
@@ -17,7 +18,7 @@ const DEFAULT_LOG_LEVEL: &str = "info";
 struct CmdArgs {
     /// Output image name
     #[structopt(short, long)]
-    output: String,
+    output: Option<String>,
     /// Upload image to repository
     #[structopt(short, long)]
     push: bool,
@@ -43,7 +44,17 @@ async fn main() -> anyhow::Result<()> {
 
     let cmdargs = CmdArgs::from_args();
 
-    crate::progress::set_total_steps(if cmdargs.push {
+    let builder = ImageBuilder::new(&cmdargs.image_name,
+                      cmdargs.output,
+                      cmdargs.env,
+                      cmdargs.vol,
+                      cmdargs.entrypoint);
+    eprintln!("start");
+    builder.build().await?;
+    eprintln!("done");
+
+    /*
+    ::progress::set_total_steps(if cmdargs.push {
         image_builder::STEPS + upload::STEPS
     } else {
         image_builder::STEPS
@@ -51,7 +62,7 @@ async fn main() -> anyhow::Result<()> {
 
     image_builder::build_image(
         &cmdargs.image_name,
-        Path::new(&cmdargs.output),
+        cmdargs.output.map(AsRef::as_ref),
         cmdargs.env,
         cmdargs.vol,
         cmdargs.entrypoint,
@@ -61,6 +72,8 @@ async fn main() -> anyhow::Result<()> {
     if cmdargs.push {
         upload::upload_image(&cmdargs.output).await?;
     }
+    */
+
 
     Ok(())
 }

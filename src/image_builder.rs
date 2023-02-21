@@ -10,12 +10,131 @@ use crate::progress::{from_progress_output, Progress, ProgressResult, Spinner, S
 use crate::rwbuf::RWBuffer;
 use awc::error::SendRequestError::Http;
 use bollard::container;
-use bollard::container::UploadToContainerOptions;
+use bollard::container::{CreateContainerOptions, DownloadFromContainerOptions, LogsOptions, StartContainerOptions, UploadToContainerOptions, WaitContainerOptions};
 use bollard::service::ContainerConfig;
 use crc::{Crc, CRC_32_ISO_HDLC};
 use std::rc::Rc;
+use bollard::models::Mount;
+use futures_util::TryStreamExt;
 
 pub(crate) const STEPS: usize = 4;
+
+
+
+pub struct ImageBuilder {
+    image_name : String,
+    output : Option<String>,
+    env: Vec<String>,
+    volumes: Vec<String>,
+    entrypoint: Option<String>,
+}
+
+impl ImageBuilder {
+
+    pub fn new(image_name: &str,
+                   output: Option<String>,
+                   env: Vec<String>,
+                   volumes: Vec<String>,
+                   entrypoint: Option<String>) -> Self {
+        ImageBuilder {
+            image_name: image_name.to_string(),
+            output,
+            env,
+            volumes,
+            entrypoint
+        }
+    }
+
+    pub async fn build(&self) -> anyhow::Result<()> {
+        use bollard::{
+            container, exec, image,
+            service::{ContainerConfig, HostConfig, Mount, MountTypeEnum},
+            Docker,
+        };
+        let docker = Docker::connect_with_local_defaults()?;
+        docker.create_image(Some(image::CreateImageOptions {
+            from_image: self.image_name.as_str(),
+            tag: "latest",
+            .. Default::default()
+        }), None, None).try_for_each(|ev| async move {
+            eprintln!("{:?}", ev);
+            Ok(())
+        }).await?;
+        let image = docker.inspect_image(&self.image_name).await?;
+        let image_id = image.id.unwrap();
+        eprintln!("id={image_id}");
+
+        let container = docker.create_container::<String, String>(None, container::Config {
+            image: Some(image_id.clone()),
+            host_config: Some(HostConfig {
+                auto_remove: Some(true),
+                .. Default::default()
+            }),
+            .. Default::default()
+        }).await?;
+        let container_id = container.id;
+        eprintln!("cid={container_id}");
+
+        let copy_result : anyhow::Result<_> = async {
+            let path = Path::new("output.gvmi");
+
+            eprintln!("path={}", path.display());
+            fs::write(&path, "")?;
+
+            let tool_container = docker.create_container::<String, &'static str>(None, container::Config {
+                image: Some("prekucki/squashfs-tools:latest"),
+                cmd: Some(vec!["mksquashfs".into(),"/work/in".into(), "/work/out/image.squashfs".into(), "-info".into(), "-comp".into(), "lzo".into(), "-noappend".into()]),
+                attach_stderr: Some(true),
+                attach_stdout: Some(true),
+                host_config: Some(HostConfig {
+                    auto_remove: Some(true),
+                    mounts: Some(vec![Mount {
+                        target: Some("/work/out/image.squashfs".into()),
+                        source: Some(path.canonicalize()?.display().to_string()),
+                        typ: Some(MountTypeEnum::BIND),
+                        .. Default::default()
+                    }]),
+                    .. Default::default()
+                }),
+                .. Default::default()
+            }).await?;
+            let input = docker
+                .download_from_container(&container_id, Some(DownloadFromContainerOptions {
+                    path: "/"
+                }));
+            docker
+                .upload_to_container::<String>(&tool_container.id, Some(UploadToContainerOptions {
+                    path: "/work/in".to_owned(),
+                    ..Default::default()
+                }), hyper::Body::wrap_stream(input)).await?;
+            eprintln!("copy file done");
+            Ok(tool_container)
+        }.await;
+        docker.remove_container(&container_id, None).await?;
+        let tool_container = copy_result?;
+
+        docker.start_container::<String>(&tool_container.id, None).await?;
+        eprintln!("container started: {}", &container_id);
+
+        docker.logs::<String>(&tool_container.id, Some(LogsOptions {
+            follow: true,
+            stderr: true,
+            stdout: true,
+            .. Default::default()
+        })).try_for_each(|ev| async move {
+            eprintln!("logs :: {:?}", ev);
+            Ok(())
+        }).await?;
+
+        docker.wait_container::<String>(&tool_container.id, None).try_for_each(|ev| async move {
+            eprintln!("end :: {:?}", ev);
+            Ok(())
+        }).await?;
+
+        Ok(())
+    }
+}
+
 
 pub async fn build_image_int(
     docker: &mut DockerInstance,
@@ -129,7 +248,7 @@ pub async fn build_image_int(
 
 pub async fn build_image(
     image_name: &str,
-    output: &Path,
+    output: Option<&Path>,
     env: Vec<String>,
     volumes: Vec<String>,
     entrypoint: Option<String>,
@@ -140,7 +259,7 @@ pub async fn build_image(
     let squash_fs_container_name = "squashfs";
 
     tokio::select! {
-        _ = build_image_int(&mut docker, image_name, output, env, volumes, entrypoint, source_container_name, squash_fs_container_name) => {
+        _ = build_image_int(&mut docker, image_name, output.unwrap(), env, volumes, entrypoint, source_container_name, squash_fs_container_name) => {
         },
         _ = tokio::signal::ctrl_c() => {
             println!("Kill signal received");
