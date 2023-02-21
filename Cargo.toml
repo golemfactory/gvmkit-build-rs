@@ -29,4 +29,4 @@ tokio = { version = "0.2", features = ["macros"] }
 trust-dns-resolver = { version = "0.19", features = ["mdns"] }
 
 [package.metadata.maturin]
-name = "gvmkit-build"
+name = "gvmkit_build"
