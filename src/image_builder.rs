@@ -11,8 +11,8 @@ use crate::rwbuf::RWBuffer;
 use awc::error::SendRequestError::Http;
 use bollard::container;
 use bollard::container::{
-    CreateContainerOptions, DownloadFromContainerOptions, LogsOptions, StartContainerOptions,
-    UploadToContainerOptions, WaitContainerOptions,
+    CreateContainerOptions, DownloadFromContainerOptions, LogOutput, LogsOptions,
+    StartContainerOptions, UploadToContainerOptions, WaitContainerOptions,
 };
 use bollard::models::Mount;
 use bollard::service::ContainerConfig;
@@ -71,7 +71,7 @@ impl ImageBuilder {
             .await?;
         let image = docker.inspect_image(&self.image_name).await?;
         let image_id = image.id.unwrap();
-        eprintln!("id={image_id}");
+        log::info!("Image name = {}, image_id={}", self.image_name, image_id);
 
         let container = docker
             .create_container::<String, String>(
@@ -90,10 +90,23 @@ impl ImageBuilder {
         eprintln!("cid={container_id}");
 
         let copy_result: anyhow::Result<_> = async {
-            let path = Path::new("output.gvmi");
+            let path = format!(
+                "{}_{}.gvmi",
+                self.image_name.replace(":", "_").replace("/", "_"),
+                &container_id[0..10]
+            );
+            let path = Path::new(&path);
+            if let Err(err) = fs::write(&path, "") {
+                log::error!("Failed to create output file: {} {}", path.display(), err);
+                return Err(anyhow::anyhow!("Failed to create output file: {}", err));
+            }
 
-            eprintln!("path={}", path.display());
-            fs::write(&path, "")?;
+            let path = path
+                .canonicalize()?
+                .display()
+                .to_string()
+                .replace(r"\\?\", ""); // strip \\?\ prefix on windows
+            log::info!("Container output path={}", path);
 
             let tool_container = docker
                 .create_container::<String, &'static str>(
@@ -115,7 +128,7 @@ impl ImageBuilder {
                             auto_remove: Some(true),
                             mounts: Some(vec![Mount {
                                 target: Some("/work/out/image.squashfs".into()),
-                                source: Some(path.canonicalize()?.display().to_string()),
+                                source: Some(path),
                                 typ: Some(MountTypeEnum::BIND),
                                 ..Default::default()
                             }]),
@@ -149,7 +162,7 @@ impl ImageBuilder {
         docker
             .start_container::<String>(&tool_container.id, None)
             .await?;
-        eprintln!("container started: {}", &container_id);
+        log::info!("Tool container started: {}", &container_id);
 
         docker
             .logs::<String>(
@@ -162,7 +175,17 @@ impl ImageBuilder {
                 }),
             )
             .try_for_each(|ev| async move {
-                eprintln!("logs :: {:?}", ev);
+                match ev {
+                    LogOutput::StdOut { message } => {
+                        let message = String::from_utf8(message.to_vec()).unwrap_or_default();
+                        log::debug!("stdout :: {}", message.trim());
+                    }
+                    LogOutput::StdErr { message } => {
+                        let message = String::from_utf8(message.to_vec()).unwrap_or_default();
+                        log::debug!("stderr :: {}", message.trim());
+                    }
+                    _ => {}
+                }
                 Ok(())
             })
             .await?;
