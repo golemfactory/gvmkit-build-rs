@@ -6,9 +6,9 @@ mod progress;
 mod rwbuf;
 mod upload;
 
+use crate::image_builder::ImageBuilder;
 use std::{env, path::Path};
 use structopt::StructOpt;
-use crate::image_builder::ImageBuilder;
 
 const INTERNAL_LOG_LEVEL: &str = "hyper=warn,bollard=warn";
 const DEFAULT_LOG_LEVEL: &str = "info";
@@ -44,11 +44,13 @@ async fn main() -> anyhow::Result<()> {
 
     let cmdargs = CmdArgs::from_args();
 
-    let builder = ImageBuilder::new(&cmdargs.image_name,
-                      cmdargs.output,
-                      cmdargs.env,
-                      cmdargs.vol,
-                      cmdargs.entrypoint);
+    let builder = ImageBuilder::new(
+        &cmdargs.image_name,
+        cmdargs.output,
+        cmdargs.env,
+        cmdargs.vol,
+        cmdargs.entrypoint,
+    );
     eprintln!("start");
     builder.build().await?;
     eprintln!("done");
@@ -73,7 +75,6 @@ async fn main() -> anyhow::Result<()> {
         upload::upload_image(&cmdargs.output).await?;
     }
     */
-
 
     Ok(())
 }
