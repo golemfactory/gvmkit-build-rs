@@ -19,6 +19,7 @@ use bollard::service::ContainerConfig;
 use crc::{Crc, CRC_32_ISO_HDLC};
 use futures_util::TryStreamExt;
 use std::rc::Rc;
+use std::time::Duration;
 
 pub(crate) const STEPS: usize = 4;
 
@@ -53,8 +54,20 @@ impl ImageBuilder {
             service::{ContainerConfig, HostConfig, Mount, MountTypeEnum},
             Docker,
         };
-        let docker = Docker::connect_with_local_defaults()?;
-        docker
+        log::info!("Building image {}", self.image_name);
+        let docker = match Docker::connect_with_local_defaults() {
+            Ok(docker) => docker,
+            Err(err) => {
+                log::error!("Failed to connect to docker: {}", err);
+                return Err(anyhow::anyhow!("Failed to connect to docker: {}", err));
+            }
+        };
+
+        log::info!(
+            "Step1 - create image from given name: {} ...",
+            self.image_name
+        );
+        match docker
             .create_image(
                 Some(image::CreateImageOptions {
                     from_image: self.image_name.as_str(),
@@ -65,13 +78,37 @@ impl ImageBuilder {
                 None,
             )
             .try_for_each(|ev| async move {
-                eprintln!("{:?}", ev);
+                log::debug!("{:?}", ev);
                 Ok(())
             })
-            .await?;
+            .await
+        {
+            Ok(_) => {}
+            Err(err) => {
+                log::error!("Failed to create image: {}", err);
+                return Err(anyhow::anyhow!("Failed to create image: {}", err));
+            }
+        }
+        log::info!("Step2 - inspect created image: {} ...", self.image_name);
         let image = docker.inspect_image(&self.image_name).await?;
         let image_id = image.id.unwrap();
-        log::info!("Image name = {}, image_id={}", self.image_name, image_id);
+        let image_id = if image_id.starts_with("sha256:") {
+            image_id.replace("sha256:", "")
+        } else {
+            log::error!("Image id is not sha256: {}", image_id);
+            return Err(anyhow::anyhow!("Image id is not sha256: {}", image_id));
+        };
+
+        log::info!(
+            " -- Image name: {}, Image id: {}",
+            self.image_name,
+            image_id
+        );
+
+        log::info!(
+            "Step3 - create container from image: {} ...",
+            self.image_name
+        );
 
         let container = docker
             .create_container::<String, String>(
@@ -87,40 +124,69 @@ impl ImageBuilder {
             )
             .await?;
         let container_id = container.id;
-        eprintln!("cid={container_id}");
+
+
+        let path = format!(
+            "{}-{}.gvmi",
+            self.image_name.replace(':', "-").replace('/', "-"),
+            &image_id[0..10]
+        );
+        let path = Path::new(&path);
+        if let Err(err) = fs::write(&path, "") {
+            log::error!("Failed to create output file: {} {}", path.display(), err);
+            return Err(anyhow::anyhow!("Failed to create output file: {}", err));
+        }
+
+        let path = path
+            .canonicalize()?
+            .display()
+            .to_string()
+            .replace(r"\\?\", ""); // strip \\?\ prefix on windows
+        log::info!(" -- GVMI image output path: {}", path);
+
+
+        let tool_image_name = "prekucki/squashfs-tools:latest";
+        log::info!("Step4 - create tool image used for image generation: {} ...", tool_image_name);
+
+        let tool_image = match docker
+            .create_image(
+                Some(image::CreateImageOptions {
+                    from_image: tool_image_name,
+                    tag: "latest",
+                    ..Default::default()
+                }),
+                None,
+                None,
+            )
+            .try_for_each(|ev| async move {
+                log::debug!("{:?}", ev);
+                Ok(())
+            })
+            .await
+        {
+            Ok(_) => {}
+            Err(err) => {
+                log::error!("Failed to create image: {} {}", tool_image_name, err);
+                return Err(anyhow::anyhow!("Failed to create image: {}", err));
+            }
+        };
+
+        log::info!("Step5 - copy data between containers: {} {} ...", self.image_name, tool_image_name);
 
         let copy_result: anyhow::Result<_> = async {
-            let path = format!(
-                "{}_{}.gvmi",
-                self.image_name.replace(":", "_").replace("/", "_"),
-                &container_id[0..10]
-            );
-            let path = Path::new(&path);
-            if let Err(err) = fs::write(&path, "") {
-                log::error!("Failed to create output file: {} {}", path.display(), err);
-                return Err(anyhow::anyhow!("Failed to create output file: {}", err));
-            }
-
-            let path = path
-                .canonicalize()?
-                .display()
-                .to_string()
-                .replace(r"\\?\", ""); // strip \\?\ prefix on windows
-            log::info!("Container output path={}", path);
-
             let tool_container = docker
                 .create_container::<String, &'static str>(
                     None,
                     container::Config {
-                        image: Some("prekucki/squashfs-tools:latest"),
+                        image: Some(tool_image_name),
                         cmd: Some(vec![
-                            "mksquashfs".into(),
-                            "/work/in".into(),
-                            "/work/out/image.squashfs".into(),
-                            "-info".into(),
-                            "-comp".into(),
-                            "lzo".into(),
-                            "-noappend".into(),
+                            "mksquashfs",
+                            "/work/in",
+                            "/work/out/image.squashfs",
+                            "-info",
+                            "-comp",
+                            "lzo",
+                            "-noappend",
                         ]),
                         attach_stderr: Some(true),
                         attach_stdout: Some(true),
@@ -138,6 +204,7 @@ impl ImageBuilder {
                     },
                 )
                 .await?;
+
             let input = docker.download_from_container(
                 &container_id,
                 Some(DownloadFromContainerOptions { path: "/" }),
@@ -152,17 +219,17 @@ impl ImageBuilder {
                     hyper::Body::wrap_stream(input),
                 )
                 .await?;
-            eprintln!("copy file done");
             Ok(tool_container)
         }
         .await;
+
         docker.remove_container(&container_id, None).await?;
         let tool_container = copy_result?;
 
         docker
             .start_container::<String>(&tool_container.id, None)
             .await?;
-        log::info!("Tool container started: {}", &container_id);
+        log::info!("Step6 - Starting tool container to create image: {}", &tool_image_name);
 
         docker
             .logs::<String>(
@@ -190,13 +257,27 @@ impl ImageBuilder {
             })
             .await?;
 
-        docker
+        log::info!("Waiting for tool container to finish...");
+        //tokio::time::sleep(Duration::from_secs(1)).await;
+        match docker
             .wait_container::<String>(&tool_container.id, None)
             .try_for_each(|ev| async move {
-                eprintln!("end :: {:?}", ev);
+                log::debug!("end :: {:?}", ev);
                 Ok(())
             })
-            .await?;
+            .await
+        {
+            Ok(_) => {
+                log::info!("Tool container finished");
+            }
+            Err(err) => {
+                if err.to_string().find("No such container").is_some() {
+                    log::info!("Tool container already removed");
+                } else {
+                    log::warn!("Failed to wait for tool container: {}", err)
+                }
+            }
+        }
 
         Ok(())
     }

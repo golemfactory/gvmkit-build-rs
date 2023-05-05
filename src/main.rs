@@ -7,9 +7,9 @@ mod rwbuf;
 mod upload;
 
 use crate::image_builder::ImageBuilder;
-use std::{env, path::Path};
 use awc::cookie::time::format_description::parse;
 use clap::Parser;
+use std::{env, path::Path};
 
 const INTERNAL_LOG_LEVEL: &str = "hyper=warn,bollard=warn";
 const DEFAULT_LOG_LEVEL: &str = "info";
