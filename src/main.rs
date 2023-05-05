@@ -7,9 +7,11 @@ mod rwbuf;
 mod upload;
 
 use crate::image_builder::ImageBuilder;
-use awc::cookie::time::format_description::parse;
+
 use clap::Parser;
-use std::{env, path::Path};
+use indicatif::ProgressStyle;
+use std::env;
+use std::time::Duration;
 
 const INTERNAL_LOG_LEVEL: &str = "hyper=warn,bollard=warn";
 const DEFAULT_LOG_LEVEL: &str = "info";
@@ -35,7 +37,9 @@ struct CmdArgs {
     /// Input Docker image name
     image_name: String, // positional
 }
-
+use console::{style, Emoji};
+use indicatif::{HumanDuration, MultiProgress, ProgressBar};
+static LOOKING_GLASS: Emoji<'_, '_> = Emoji("🔍  ", "");
 #[tokio::main(flavor = "current_thread")]
 async fn main() -> anyhow::Result<()> {
     let log_level = env::var(env_logger::DEFAULT_FILTER_ENV).unwrap_or(DEFAULT_LOG_LEVEL.into());
@@ -52,30 +56,23 @@ async fn main() -> anyhow::Result<()> {
         cmdargs.vol,
         cmdargs.entrypoint,
     );
-    eprintln!("start");
+
+    let spinner_style = ProgressStyle::with_template("{prefix:.bold.dim} {spinner} {wide_msg}")
+        .unwrap()
+        .tick_chars("⠁⠂⠄⡀⢀⠠⠐⠈ ");
+
+    println!(
+        "{} {}Resolving packages...",
+        style("[1/4]").bold().dim(),
+        LOOKING_GLASS
+    );
+    let deps = 1232;
+
     builder.build().await?;
-    eprintln!("done");
-
-    /*
-    ::progress::set_total_steps(if cmdargs.push {
-        image_builder::STEPS + upload::STEPS
-    } else {
-        image_builder::STEPS
-    });
-
-    image_builder::build_image(
-        &cmdargs.image_name,
-        cmdargs.output.map(AsRef::as_ref),
-        cmdargs.env,
-        cmdargs.vol,
-        cmdargs.entrypoint,
-    )
-    .await?;
 
     if cmdargs.push {
-        upload::upload_image(&cmdargs.output).await?;
+        // upload::upload_image(&cmdargs.output).await?;
     }
-    */
 
     Ok(())
 }

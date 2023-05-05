@@ -41,7 +41,7 @@ impl Default for ContainerOptions {
         }
     }
 }
-
+/*
 pub struct DockerInstance {
     pub docker: Docker,
 }
@@ -261,3 +261,4 @@ impl DockerInstance {
         Ok((hash, cfg))
     }
 }
+*/

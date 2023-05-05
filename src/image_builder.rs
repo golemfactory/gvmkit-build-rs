@@ -1,25 +1,28 @@
-use bytes::{Bytes, BytesMut};
+use bytes::Bytes;
 use std::{
     fs,
     io::Write,
     path::{Path, PathBuf},
 };
+use std::collections::HashMap;
 
-use crate::docker::{ContainerOptions, DockerInstance};
+use crate::docker::ContainerOptions;
 use crate::progress::{from_progress_output, Progress, ProgressResult, Spinner, SpinnerResult};
 use crate::rwbuf::RWBuffer;
-use awc::error::SendRequestError::Http;
+use humansize::{FormatSize, FormatSizeI, DECIMAL};
+
 use bollard::container;
 use bollard::container::{
-    CreateContainerOptions, DownloadFromContainerOptions, LogOutput, LogsOptions,
-    StartContainerOptions, UploadToContainerOptions, WaitContainerOptions,
+    DownloadFromContainerOptions, LogOutput, LogsOptions, UploadToContainerOptions,
 };
-use bollard::models::Mount;
+
 use bollard::service::ContainerConfig;
 use crc::{Crc, CRC_32_ISO_HDLC};
 use futures_util::TryStreamExt;
+use indicatif::{MultiProgress, ProgressBar, ProgressStyle};
 use std::rc::Rc;
-use std::time::Duration;
+use std::sync::Arc;
+use tokio::sync::Mutex;
 
 pub(crate) const STEPS: usize = 4;
 
@@ -50,8 +53,8 @@ impl ImageBuilder {
 
     pub async fn build(&self) -> anyhow::Result<()> {
         use bollard::{
-            container, exec, image,
-            service::{ContainerConfig, HostConfig, Mount, MountTypeEnum},
+            image,
+            service::{HostConfig, Mount, MountTypeEnum},
             Docker,
         };
         log::info!("Building image {}", self.image_name);
@@ -63,6 +66,21 @@ impl ImageBuilder {
             }
         };
 
+        let sty = ProgressStyle::with_template(
+            "[{msg:20}] {bar:50.cyan/blue} {pos:9}/{len:9}",
+        )
+            .unwrap()
+            .progress_chars("##-");
+
+        let spinner_style = ProgressStyle::with_template("{prefix:.bold.dim} {spinner} {wide_msg}")
+            .unwrap()
+            .tick_chars("⠁⠂⠄⡀⢀⠠⠐⠈ ");
+
+        let mp = MultiProgress::new();
+        //let pb = mp.add(ProgressBar::new(10));
+       // pb.set_style(spinner_style.clone());
+
+        let layers = Arc::new(Mutex::new(HashMap::<String, ProgressBar>::new()));
         log::info!(
             "Step1 - create image from given name: {} ...",
             self.image_name
@@ -77,8 +95,35 @@ impl ImageBuilder {
                 None,
                 None,
             )
-            .try_for_each(|ev| async move {
-                log::debug!("{:?}", ev);
+            .try_for_each(|ev| async {
+               // let pb = pb.clone();
+                let layers = layers.clone();
+                //log::info!("{:?}", ev);
+                if let Some(id) = ev.id {
+                    let pb = {
+                        let mut layers = layers.lock().await;
+                        if let Some(pb) = layers.get(&id) {
+                            pb.clone()
+                        } else {
+                            let pb = mp.add(ProgressBar::new(1));
+                            pb.set_style(sty.clone());
+                            layers.insert(id.clone(), pb.clone());
+                            pb
+                        }
+                    };
+                    if let Some(status) = ev.status {
+                        pb.set_message(status);
+                    }
+
+                    match ev.progress_detail {
+                        Some(detail) => {
+                            //log::info!(" -- {:?}", detail);
+                            pb.set_length(detail.total.unwrap_or(0) as u64);
+                            pb.set_position(detail.current.unwrap_or(0) as u64);
+                        }
+                        None => {}
+                    }
+                }
                 Ok(())
             })
             .await
@@ -89,6 +134,11 @@ impl ImageBuilder {
                 return Err(anyhow::anyhow!("Failed to create image: {}", err));
             }
         }
+        for (_, pb) in layers.lock().await.iter() {
+            pb.finish_and_clear();
+        }
+        //pb.finish_and_clear();
+
         log::info!("Step2 - inspect created image: {} ...", self.image_name);
         let image = docker.inspect_image(&self.image_name).await?;
         let image_id = image.id.unwrap();
@@ -125,7 +175,6 @@ impl ImageBuilder {
             .await?;
         let container_id = container.id;
 
-
         let path = format!(
             "{}-{}.gvmi",
             self.image_name.replace(':', "-").replace('/', "-"),
@@ -144,11 +193,13 @@ impl ImageBuilder {
             .replace(r"\\?\", ""); // strip \\?\ prefix on windows
         log::info!(" -- GVMI image output path: {}", path);
 
-
         let tool_image_name = "prekucki/squashfs-tools:latest";
-        log::info!("Step4 - create tool image used for image generation: {} ...", tool_image_name);
+        log::info!(
+            "Step4 - create tool image used for image generation: {} ...",
+            tool_image_name
+        );
 
-        let tool_image = match docker
+        let _tool_image = match docker
             .create_image(
                 Some(image::CreateImageOptions {
                     from_image: tool_image_name,
@@ -171,7 +222,11 @@ impl ImageBuilder {
             }
         };
 
-        log::info!("Step5 - copy data between containers: {} {} ...", self.image_name, tool_image_name);
+        log::info!(
+            "Step5 - copy data between containers: {} {} ...",
+            self.image_name,
+            tool_image_name
+        );
 
         let copy_result: anyhow::Result<_> = async {
             let tool_container = docker
@@ -229,7 +284,10 @@ impl ImageBuilder {
         docker
             .start_container::<String>(&tool_container.id, None)
             .await?;
-        log::info!("Step6 - Starting tool container to create image: {}", &tool_image_name);
+        log::info!(
+            "Step6 - Starting tool container to create image: {}",
+            &tool_image_name
+        );
 
         docker
             .logs::<String>(
@@ -283,6 +341,7 @@ impl ImageBuilder {
     }
 }
 
+/*
 pub async fn build_image_int(
     docker: &mut DockerInstance,
     image_name: &str,
@@ -326,7 +385,7 @@ pub async fn build_image_int(
     let options = container::DownloadFromContainerOptions {
         path: "/".to_owned(),
     };
-    let mut stream_in = docker
+    let stream_in = docker
         .docker
         .download_from_container(source_container_name, Some(options));
 
@@ -392,7 +451,8 @@ pub async fn build_image_int(
     .progress_result(&progress)?;
     Ok(())
 }
-
+*/
+/*
 pub async fn build_image(
     image_name: &str,
     output: Option<&Path>,
@@ -432,7 +492,7 @@ pub async fn build_image(
         .spinner_result(&spinner)?;
     Ok(())
 }
-
+*/
 fn add_file(tar: &mut tar::Builder<RWBuffer>, path: &Path, data: &[u8]) -> anyhow::Result<()> {
     let mut header = tar::Header::new_ustar();
     header.set_path(path)?;
@@ -489,6 +549,7 @@ fn add_metadata_outside(image_path: &Path, config: &ContainerConfig) -> anyhow::
     Ok(())
 }
 
+/*
 async fn repack(
     tar: tar::Builder<RWBuffer>,
     docker: &mut DockerInstance,
@@ -537,7 +598,7 @@ async fn repack(
 
     Ok(dir_out.join(Path::new(path_out).file_name().unwrap()))
 }
-
+*/
 fn tar_from_bytes(bytes: &Bytes) -> anyhow::Result<tar::Builder<RWBuffer>> {
     // the tar builder doesn't have any method for constructing an archive from in-memory
     // representation of the whole file, so we need to do that in chunks
