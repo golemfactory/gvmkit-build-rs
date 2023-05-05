@@ -8,28 +8,29 @@ mod upload;
 
 use crate::image_builder::ImageBuilder;
 use std::{env, path::Path};
-use structopt::StructOpt;
+use awc::cookie::time::format_description::parse;
+use clap::Parser;
 
 const INTERNAL_LOG_LEVEL: &str = "hyper=warn,bollard=warn";
 const DEFAULT_LOG_LEVEL: &str = "info";
 
-#[derive(StructOpt)]
-#[structopt(rename_all = "kebab-case")]
+#[derive(Parser, Debug)]
+#[command(author, version, about, long_about = None)]
 struct CmdArgs {
     /// Output image name
-    #[structopt(short, long)]
+    #[arg(short, long)]
     output: Option<String>,
     /// Upload image to repository
-    #[structopt(short, long)]
+    #[arg(short, long)]
     push: bool,
     /// Specify additional image environment variable
-    #[structopt(long)]
+    #[arg(long)]
     env: Vec<String>,
     /// Specify additional image volume
-    #[structopt(short, long)]
+    #[arg(short, long)]
     vol: Vec<String>,
     /// Specify image entrypoint
-    #[structopt(short, long)]
+    #[arg(short, long)]
     entrypoint: Option<String>,
     /// Input Docker image name
     image_name: String, // positional
@@ -42,7 +43,7 @@ async fn main() -> anyhow::Result<()> {
     env::set_var(env_logger::DEFAULT_FILTER_ENV, log_filter);
     env_logger::init();
 
-    let cmdargs = CmdArgs::from_args();
+    let cmdargs = <CmdArgs as Parser>::parse();
 
     let builder = ImageBuilder::new(
         &cmdargs.image_name,
