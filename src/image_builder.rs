@@ -15,7 +15,7 @@ use bollard::container::{
     DownloadFromContainerOptions, LogOutput, LogsOptions, UploadToContainerOptions,
 };
 
-use crate::wrapper::stream_with_progress;
+use crate::wrapper::{stream_with_progress, ProgressContext};
 use bollard::service::ContainerConfig;
 use crc::{Crc, CRC_32_ISO_HDLC};
 use futures_util::{stream, Stream, TryStreamExt};
@@ -271,18 +271,11 @@ impl ImageBuilder {
                 &container_id,
                 Some(DownloadFromContainerOptions { path: "/" }),
             );
+
+            let pc = ProgressContext::new();
             let pb = ProgressBar::new(image_size as u64);
             pb.set_style(sty.clone());
-            let input = stream_with_progress(input, &pb);
-
-            /*loop {
-                tokio::select! {
-                    msg = input.next() => {
-                        println!("Got: {:?}", msg);
-                    },
-                    _ = tokio::signal::ctrl_c() => break,
-                }
-            }*/
+            let input = stream_with_progress(input, &pb, pc.clone());
 
             docker
                 .upload_to_container::<String>(
@@ -295,6 +288,11 @@ impl ImageBuilder {
                 )
                 .await?;
             pb.finish_and_clear();
+            log::info!(
+                " -- Copying data finished. Copied {} bytes vs {} bytes image",
+                pc.total_bytes(),
+                image_size
+            );
             Ok(tool_container)
         }
         .await;
@@ -310,6 +308,12 @@ impl ImageBuilder {
             &tool_image_name
         );
 
+        let pg = ProgressBar::new(image_size as u64);
+        let sty = ProgressStyle::with_template("{bar:50.cyan/blue} {pos:9}/{len:9} [{msg}]")
+            .unwrap()
+            .progress_chars("##-");
+
+        pg.set_style(sty.clone());
         docker
             .logs::<String>(
                 &tool_container.id,
@@ -320,22 +324,53 @@ impl ImageBuilder {
                     ..Default::default()
                 }),
             )
-            .try_for_each(|ev| async move {
-                match ev {
-                    LogOutput::StdOut { message } => {
-                        let message = String::from_utf8(message.to_vec()).unwrap_or_default();
-                        log::debug!("stdout :: {}", message.trim());
+            .try_for_each(|ev| {
+                let pg = pg.clone();
+                async move {
+                    match ev {
+                        LogOutput::StdOut { message } => {
+                            let message = String::from_utf8(message.to_vec()).unwrap_or_default();
+                            if message.contains("uncompressed size") {
+                                let mut spl = message.split("uncompressed size");
+                                let filename = spl.next();
+                                let value = spl
+                                    .next()
+                                    .unwrap_or(&"0 bytes")
+                                    .split("bytes")
+                                    .next()
+                                    .unwrap_or(&"0")
+                                    .trim()
+                                    .parse::<u64>()
+                                    .unwrap_or(0);
+                                //log::info!("uncompressed size :: {}", value);
+                                if value != 0 {
+                                    pg.inc(value);
+                                    let part = filename.unwrap_or_default();
+                                    if part.starts_with("file") {
+                                        let mut split = part.split("file");
+                                        split.next();
+                                        let part2 = split.next().unwrap_or_default();
+                                        let part2 = part2.split(",").next().unwrap_or_default();
+                                        pg.set_message(part2.trim().to_string());
+                                    }
+                                }
+                            }
+                            //parse to int
+
+                            //log::info!("stdout :: {}", message.trim());
+                        }
+                        LogOutput::StdErr { message } => {
+                            let message = String::from_utf8(message.to_vec()).unwrap_or_default();
+                            log::info!("stderr :: {}", message.trim());
+                        }
+                        _ => {}
                     }
-                    LogOutput::StdErr { message } => {
-                        let message = String::from_utf8(message.to_vec()).unwrap_or_default();
-                        log::debug!("stderr :: {}", message.trim());
-                    }
-                    _ => {}
+                    Ok(())
                 }
-                Ok(())
             })
             .await?;
 
+        pg.finish_and_clear();
         log::info!("Waiting for tool container to finish...");
         //tokio::time::sleep(Duration::from_secs(1)).await;
         match docker
