@@ -1,10 +1,10 @@
 use bytes::Bytes;
+use std::collections::HashMap;
 use std::{
     fs,
     io::Write,
     path::{Path, PathBuf},
 };
-use std::collections::HashMap;
 
 use crate::docker::ContainerOptions;
 use crate::progress::{from_progress_output, Progress, ProgressResult, Spinner, SpinnerResult};
@@ -66,9 +66,7 @@ impl ImageBuilder {
             }
         };
 
-        let sty = ProgressStyle::with_template(
-            "[{msg:20}] {bar:50.cyan/blue} {pos:9}/{len:9}",
-        )
+        let sty = ProgressStyle::with_template("[{msg:20}] {bar:50.cyan/blue} {pos:9}/{len:9}")
             .unwrap()
             .progress_chars("##-");
 
@@ -78,7 +76,7 @@ impl ImageBuilder {
 
         let mp = MultiProgress::new();
         //let pb = mp.add(ProgressBar::new(10));
-       // pb.set_style(spinner_style.clone());
+        // pb.set_style(spinner_style.clone());
 
         let layers = Arc::new(Mutex::new(HashMap::<String, ProgressBar>::new()));
         log::info!(
@@ -96,7 +94,7 @@ impl ImageBuilder {
                 None,
             )
             .try_for_each(|ev| async {
-               // let pb = pb.clone();
+                // let pb = pb.clone();
                 let layers = layers.clone();
                 //log::info!("{:?}", ev);
                 if let Some(id) = ev.id {
