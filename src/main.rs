@@ -5,6 +5,7 @@ mod image_builder;
 mod progress;
 mod rwbuf;
 mod upload;
+mod wrapper;
 
 use crate::image_builder::ImageBuilder;
 

@@ -9,16 +9,17 @@ use std::{
 use crate::docker::ContainerOptions;
 use crate::progress::{from_progress_output, Progress, ProgressResult, Spinner, SpinnerResult};
 use crate::rwbuf::RWBuffer;
-use humansize::{FormatSize, FormatSizeI, DECIMAL};
 
 use bollard::container;
 use bollard::container::{
     DownloadFromContainerOptions, LogOutput, LogsOptions, UploadToContainerOptions,
 };
 
+use crate::wrapper::stream_with_progress;
 use bollard::service::ContainerConfig;
 use crc::{Crc, CRC_32_ISO_HDLC};
-use futures_util::TryStreamExt;
+use futures_util::{stream, Stream, TryStreamExt};
+use humansize::FormatSizeOptions;
 use indicatif::{MultiProgress, ProgressBar, ProgressStyle};
 use std::rc::Rc;
 use std::sync::Arc;
@@ -97,12 +98,17 @@ impl ImageBuilder {
                 // let pb = pb.clone();
                 let layers = layers.clone();
                 //log::info!("{:?}", ev);
-                if let Some(id) = ev.id {
+                if let Some(id) = ev.clone().id {
+                    if ev.progress_detail.is_none() {
+                        //log::info!(" -- {:?}", ev);
+                        return Ok(());
+                    };
                     let pb = {
                         let mut layers = layers.lock().await;
                         if let Some(pb) = layers.get(&id) {
                             pb.clone()
                         } else {
+                            //log::info!(" -- new Layer: {:?}", ev);
                             let pb = mp.add(ProgressBar::new(1));
                             pb.set_style(sty.clone());
                             layers.insert(id.clone(), pb.clone());
@@ -147,10 +153,13 @@ impl ImageBuilder {
             return Err(anyhow::anyhow!("Image id is not sha256: {}", image_id));
         };
 
+        let image_size = image.size.unwrap_or(0);
+
         log::info!(
-            " -- Image name: {}, Image id: {}",
+            " -- Image name: {}, Image id: {}, Image size: {}",
             self.image_name,
-            image_id
+            image_id,
+            humansize::format_size(image_size as u64, FormatSizeOptions::default())
         );
 
         log::info!(
@@ -258,10 +267,23 @@ impl ImageBuilder {
                 )
                 .await?;
 
-            let input = docker.download_from_container(
+            let mut input = docker.download_from_container(
                 &container_id,
                 Some(DownloadFromContainerOptions { path: "/" }),
             );
+            let pb = ProgressBar::new(image_size as u64);
+            pb.set_style(sty.clone());
+            let input = stream_with_progress(input, &pb);
+
+            /*loop {
+                tokio::select! {
+                    msg = input.next() => {
+                        println!("Got: {:?}", msg);
+                    },
+                    _ = tokio::signal::ctrl_c() => break,
+                }
+            }*/
+
             docker
                 .upload_to_container::<String>(
                     &tool_container.id,
@@ -272,6 +294,7 @@ impl ImageBuilder {
                     hyper::Body::wrap_stream(input),
                 )
                 .await?;
+            pb.finish_and_clear();
             Ok(tool_container)
         }
         .await;
