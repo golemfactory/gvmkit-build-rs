@@ -67,20 +67,16 @@ impl ImageBuilder {
             }
         };
 
-        let sty = ProgressStyle::with_template("[{msg:20}] {bar:50.cyan/blue} {pos:9}/{len:9}")
+        let sty = ProgressStyle::with_template("[{msg:20}] {wide_bar:.cyan/blue} {pos:9}/{len:9}")
             .unwrap()
             .progress_chars("##-");
-
-        let spinner_style = ProgressStyle::with_template("{prefix:.bold.dim} {spinner} {wide_msg}")
-            .unwrap()
-            .tick_chars("⠁⠂⠄⡀⢀⠠⠐⠈ ");
 
         let mp = MultiProgress::new();
         //let pb = mp.add(ProgressBar::new(10));
         // pb.set_style(spinner_style.clone());
 
         let layers = Arc::new(Mutex::new(HashMap::<String, ProgressBar>::new()));
-        log::info!(
+        println!(
             "Step1 - create image from given name: {} ...",
             self.image_name
         );
@@ -143,7 +139,7 @@ impl ImageBuilder {
         }
         //pb.finish_and_clear();
 
-        log::info!("Step2 - inspect created image: {} ...", self.image_name);
+        println!("Step2 - inspect created image: {} ...", self.image_name);
         let image = docker.inspect_image(&self.image_name).await?;
         let image_id = image.id.unwrap();
         let image_id = if image_id.starts_with("sha256:") {
@@ -155,14 +151,14 @@ impl ImageBuilder {
 
         let image_size = image.size.unwrap_or(0);
 
-        log::info!(
-            " -- Image name: {}, Image id: {}, Image size: {}",
+        println!(
+            " -- Image name: {}\n -- Image id: {}\n -- Image size: {}",
             self.image_name,
             image_id,
             humansize::format_size(image_size as u64, FormatSizeOptions::default())
         );
 
-        log::info!(
+        println!(
             "Step3 - create container from image: {} ...",
             self.image_name
         );
@@ -198,10 +194,10 @@ impl ImageBuilder {
             .display()
             .to_string()
             .replace(r"\\?\", ""); // strip \\?\ prefix on windows
-        log::info!(" -- GVMI image output path: {}", path);
+        println!(" -- GVMI image output path: {}", path);
 
         let tool_image_name = "prekucki/squashfs-tools:latest";
-        log::info!(
+        println!(
             "Step4 - create tool image used for image generation: {} ...",
             tool_image_name
         );
@@ -229,7 +225,7 @@ impl ImageBuilder {
             }
         };
 
-        log::info!(
+        println!(
             "Step5 - copy data between containers: {} {} ...",
             self.image_name,
             tool_image_name
@@ -288,7 +284,7 @@ impl ImageBuilder {
                 )
                 .await?;
             pb.finish_and_clear();
-            log::info!(
+            println!(
                 " -- Copying data finished. Copied {} bytes vs {} bytes image",
                 pc.total_bytes(),
                 image_size
@@ -303,13 +299,14 @@ impl ImageBuilder {
         docker
             .start_container::<String>(&tool_container.id, None)
             .await?;
-        log::info!(
+        println!(
             "Step6 - Starting tool container to create image: {}",
             &tool_image_name
         );
 
         let pg = ProgressBar::new(image_size as u64);
-        let sty = ProgressStyle::with_template("{bar:50.cyan/blue} {pos:9}/{len:9} [{msg}]")
+
+        let sty = ProgressStyle::with_template("{bar:50.cyan/blue} {pos:9}/{len:9} [{wide_msg}]")
             .unwrap()
             .progress_chars("##-");
 
@@ -371,7 +368,7 @@ impl ImageBuilder {
             .await?;
 
         pg.finish_and_clear();
-        log::info!("Waiting for tool container to finish...");
+        println!("Waiting for tool container to finish...");
         //tokio::time::sleep(Duration::from_secs(1)).await;
         match docker
             .wait_container::<String>(&tool_container.id, None)
@@ -382,11 +379,11 @@ impl ImageBuilder {
             .await
         {
             Ok(_) => {
-                log::info!("Tool container finished");
+                println!("Tool container finished");
             }
             Err(err) => {
                 if err.to_string().find("No such container").is_some() {
-                    log::info!("Tool container already removed");
+                    println!("Tool container already removed");
                 } else {
                     log::warn!("Failed to wait for tool container: {}", err)
                 }
