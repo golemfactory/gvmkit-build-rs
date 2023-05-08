@@ -58,7 +58,7 @@ impl ImageBuilder {
             service::{HostConfig, Mount, MountTypeEnum},
             Docker,
         };
-        log::info!("Building image {}", self.image_name);
+        println!("Building image: {}", self.image_name);
         let docker = match Docker::connect_with_local_defaults() {
             Ok(docker) => docker,
             Err(err) => {
@@ -72,12 +72,10 @@ impl ImageBuilder {
             .progress_chars("##-");
 
         let mp = MultiProgress::new();
-        //let pb = mp.add(ProgressBar::new(10));
-        // pb.set_style(spinner_style.clone());
-
         let layers = Arc::new(Mutex::new(HashMap::<String, ProgressBar>::new()));
+
         println!(
-            "Step1 - create image from given name: {} ...",
+            "* Step1 - create image from given name: {} ...",
             self.image_name
         );
         match docker
@@ -137,9 +135,11 @@ impl ImageBuilder {
         for (_, pb) in layers.lock().await.iter() {
             pb.finish_and_clear();
         }
+
+
         //pb.finish_and_clear();
 
-        println!("Step2 - inspect created image: {} ...", self.image_name);
+        println!("* Step2 - inspect created image: {} ...", self.image_name);
         let image = docker.inspect_image(&self.image_name).await?;
         let image_id = image.id.unwrap();
         let image_id = if image_id.starts_with("sha256:") {
@@ -159,7 +159,7 @@ impl ImageBuilder {
         );
 
         println!(
-            "Step3 - create container from image: {} ...",
+            "* Step3 - create container from image: {} ...",
             self.image_name
         );
 
@@ -198,7 +198,7 @@ impl ImageBuilder {
 
         let tool_image_name = "prekucki/squashfs-tools:latest";
         println!(
-            "Step4 - create tool image used for image generation: {} ...",
+            "* Step4 - create tool image used for image generation: {} ...",
             tool_image_name
         );
 
@@ -226,7 +226,7 @@ impl ImageBuilder {
         };
 
         println!(
-            "Step5 - copy data between containers: {} {} ...",
+            "* Step5 - copy data between containers: {} {} ...",
             self.image_name,
             tool_image_name
         );
@@ -252,7 +252,7 @@ impl ImageBuilder {
                             auto_remove: Some(true),
                             mounts: Some(vec![Mount {
                                 target: Some("/work/out/image.squashfs".into()),
-                                source: Some(path),
+                                source: Some(path.clone()),
                                 typ: Some(MountTypeEnum::BIND),
                                 ..Default::default()
                             }]),
@@ -271,6 +271,7 @@ impl ImageBuilder {
             let pc = ProgressContext::new();
             let pb = ProgressBar::new(image_size as u64);
             pb.set_style(sty.clone());
+            pb.set_message("Copying files from /");
             let input = stream_with_progress(input, &pb, pc.clone());
 
             docker
@@ -300,17 +301,29 @@ impl ImageBuilder {
             .start_container::<String>(&tool_container.id, None)
             .await?;
         println!(
-            "Step6 - Starting tool container to create image: {}",
+            "* Step6 - Starting tool container to create image: {}",
             &tool_image_name
         );
 
-        let pg = ProgressBar::new(image_size as u64);
+        let mp = MultiProgress::new();
 
-        let sty = ProgressStyle::with_template("{bar:50.cyan/blue} {pos:9}/{len:9} [{wide_msg}]")
+        let pg1 = ProgressBar::new(image_size as u64);
+        let pg2 = ProgressBar::new(image_size as u64);
+
+        mp.add(pg1.clone());
+        mp.add(pg2.clone());
+
+        let sty1 = ProgressStyle::with_template("{wide_bar:.cyan/blue}")
+            .unwrap()
+            .progress_chars("##-");
+        let sty2 = ProgressStyle::with_template("{pos:9}/{len:9} [{wide_msg}]")
             .unwrap()
             .progress_chars("##-");
 
-        pg.set_style(sty.clone());
+        pg1.set_style(sty1);
+        pg2.set_style(sty2);
+
+
         docker
             .logs::<String>(
                 &tool_container.id,
@@ -322,7 +335,9 @@ impl ImageBuilder {
                 }),
             )
             .try_for_each(|ev| {
-                let pg = pg.clone();
+                let pg1 = pg1.clone();
+                let pg2 = pg2.clone();
+
                 async move {
                     match ev {
                         LogOutput::StdOut { message } => {
@@ -341,14 +356,15 @@ impl ImageBuilder {
                                     .unwrap_or(0);
                                 //log::info!("uncompressed size :: {}", value);
                                 if value != 0 {
-                                    pg.inc(value);
+                                    pg1.inc(value);
+                                    pg2.inc(value);
                                     let part = filename.unwrap_or_default();
                                     if part.starts_with("file") {
                                         let mut split = part.split("file");
                                         split.next();
                                         let part2 = split.next().unwrap_or_default();
                                         let part2 = part2.split(",").next().unwrap_or_default();
-                                        pg.set_message(part2.trim().to_string());
+                                        pg2.set_message(part2.trim().to_string());
                                     }
                                 }
                             }
@@ -367,8 +383,9 @@ impl ImageBuilder {
             })
             .await?;
 
-        pg.finish_and_clear();
-        println!("Waiting for tool container to finish...");
+        pg1.finish_and_clear();
+        pg2.finish_and_clear();
+        println!("* Step7 - Waiting for tool container to finish...");
         //tokio::time::sleep(Duration::from_secs(1)).await;
         match docker
             .wait_container::<String>(&tool_container.id, None)
@@ -379,15 +396,19 @@ impl ImageBuilder {
             .await
         {
             Ok(_) => {
-                println!("Tool container finished");
+                println!(" -- Tool container finished");
             }
             Err(err) => {
                 if err.to_string().find("No such container").is_some() {
-                    println!("Tool container already removed");
+                    println!(" -- Tool container already removed");
                 } else {
                     log::warn!("Failed to wait for tool container: {}", err)
                 }
             }
+        }
+        let file_length = fs::metadata(&path)?.len();
+        if file_length != 0 {
+            println!(" -- Output gvmi image size: {} ({}), path: {}", humansize::format_size(file_length, FormatSizeOptions::default()), file_length, path);
         }
 
         Ok(())
