@@ -1,5 +1,6 @@
 use bytes::Bytes;
 use std::collections::HashMap;
+use std::io::{Read, Seek, SeekFrom};
 use std::{
     fs,
     io::Write,
@@ -16,11 +17,13 @@ use bollard::container::{
 };
 
 use crate::wrapper::{stream_with_progress, ProgressContext};
+use anyhow::anyhow;
 use bollard::service::ContainerConfig;
 use crc::{Crc, CRC_32_ISO_HDLC};
 use futures_util::{stream, Stream, TryStreamExt};
-use humansize::FormatSizeOptions;
+use humansize::{FormatSizeOptions, DECIMAL};
 use indicatif::{MultiProgress, ProgressBar, ProgressStyle};
+use serde_json::json;
 use std::rc::Rc;
 use std::sync::Arc;
 use tokio::sync::Mutex;
@@ -30,6 +33,7 @@ pub(crate) const STEPS: usize = 4;
 pub struct ImageBuilder {
     image_name: String,
     output: Option<String>,
+    force_overwrite: bool,
     env: Vec<String>,
     volumes: Vec<String>,
     entrypoint: Option<String>,
@@ -39,6 +43,7 @@ impl ImageBuilder {
     pub fn new(
         image_name: &str,
         output: Option<String>,
+        force_overwrite: bool,
         env: Vec<String>,
         volumes: Vec<String>,
         entrypoint: Option<String>,
@@ -46,6 +51,7 @@ impl ImageBuilder {
         ImageBuilder {
             image_name: image_name.to_string(),
             output,
+            force_overwrite,
             env,
             volumes,
             entrypoint,
@@ -78,11 +84,35 @@ impl ImageBuilder {
             "* Step1 - create image from given name: {} ...",
             self.image_name
         );
+        let (tag_from_image_name, image_base_name) = if self.image_name.contains(":") {
+            let tag = self
+                .image_name
+                .split(":")
+                .last()
+                .unwrap_or("latest")
+                .to_string();
+            if self.image_name.starts_with(":") {
+                return Err(anyhow::anyhow!("Invalid image name: {}", self.image_name));
+            }
+            let image_base_name = self
+                .image_name
+                .split(":")
+                .next()
+                .expect("It has to work")
+                .to_string();
+            (tag, image_base_name)
+        } else {
+            ("latest".to_string(), self.image_name.clone())
+        };
+        println!(
+            " -- image: {}\n -- tag: {}",
+            image_base_name, tag_from_image_name
+        );
         match docker
             .create_image(
                 Some(image::CreateImageOptions {
                     from_image: self.image_name.as_str(),
-                    tag: "latest",
+                    tag: &tag_from_image_name,
                     ..Default::default()
                 }),
                 None,
@@ -136,7 +166,6 @@ impl ImageBuilder {
             pb.finish_and_clear();
         }
 
-
         //pb.finish_and_clear();
 
         println!("* Step2 - inspect created image: {} ...", self.image_name);
@@ -155,8 +184,54 @@ impl ImageBuilder {
             " -- Image name: {}\n -- Image id: {}\n -- Image size: {}",
             self.image_name,
             image_id,
-            humansize::format_size(image_size as u64, FormatSizeOptions::default())
+            humansize::format_size(image_size as u64, DECIMAL)
         );
+
+
+        let path = if let Some(path) = &self.output {
+            path.clone()
+        } else {
+            format!(
+                "{}-{}-{}.gvmi",
+                image_base_name.replace('/', "-"),
+                tag_from_image_name,
+                &image_id[0..10]
+            )
+        };
+
+        let path = Path::new(&path);
+        if path.exists() {
+            let meta_out = read_metadata_outside(&path).await;
+            match meta_out {
+                Ok(meta_out) => {
+                    if let Some(image_left) = meta_out.image {
+                        if image_left == image_id {
+                            if self.force_overwrite {
+                                println!(" -- GVMI image already exists - overwriting: {}", path.display());
+                            } else {
+                                println!(" -- GVMI image already exists: {}", path.display());
+                                return Ok(());
+                            }
+                        } else {
+                            println!(" -- GVMI image id mismatch: {}", path.display());
+                        }
+                    }
+                }
+                Err(err) => {
+                    return Err(anyhow::anyhow!("Failed to read metadata from GVMI image: {}", path.display()));
+                }
+            }
+        }
+        if let Err(err) = fs::write(&path, "") {
+            log::error!("Failed to create output file: {} {}", path.display(), err);
+            return Err(anyhow::anyhow!("Failed to create output file: {}", err));
+        }
+
+        let path = path.canonicalize()?
+            .display()
+            .to_string()
+            .replace(r"\\?\", ""); // strip \\?\ prefix on windows
+        println!(" -- GVMI image output path: {}", path);
 
         println!(
             "* Step3 - create container from image: {} ...",
@@ -177,28 +252,15 @@ impl ImageBuilder {
             )
             .await?;
         let container_id = container.id;
+        let cont = docker
+            .inspect_container(&container_id, None::<container::InspectContainerOptions>)
+            .await?;
 
-        let path = format!(
-            "{}-{}.gvmi",
-            self.image_name.replace(':', "-").replace('/', "-"),
-            &image_id[0..10]
-        );
-        let path = Path::new(&path);
-        if let Err(err) = fs::write(&path, "") {
-            log::error!("Failed to create output file: {} {}", path.display(), err);
-            return Err(anyhow::anyhow!("Failed to create output file: {}", err));
-        }
-
-        let path = path
-            .canonicalize()?
-            .display()
-            .to_string()
-            .replace(r"\\?\", ""); // strip \\?\ prefix on windows
-        println!(" -- GVMI image output path: {}", path);
+        println!(" -- Container id: {}", &container_id[0..12]);
 
         let tool_image_name = "prekucki/squashfs-tools:latest";
         println!(
-            "* Step4 - create tool image used for image generation: {} ...",
+            "* Step4 - create tool container used for gvmi generation: {} ...",
             tool_image_name
         );
 
@@ -224,12 +286,6 @@ impl ImageBuilder {
                 return Err(anyhow::anyhow!("Failed to create image: {}", err));
             }
         };
-
-        println!(
-            "* Step5 - copy data between containers: {} {} ...",
-            self.image_name,
-            tool_image_name
-        );
 
         let copy_result: anyhow::Result<_> = async {
             let tool_container = docker
@@ -262,6 +318,14 @@ impl ImageBuilder {
                     },
                 )
                 .await?;
+
+            println!(" -- Tool container id: {}", &tool_container.id[0..12]);
+
+            println!(
+                "* Step5 - copy data between containers {} and {} ...",
+                &container_id[0..12],
+                &tool_container.id[0..12]
+            );
 
             let mut input = docker.download_from_container(
                 &container_id,
@@ -302,7 +366,7 @@ impl ImageBuilder {
             .await?;
         println!(
             "* Step6 - Starting tool container to create image: {}",
-            &tool_image_name
+            &tool_container.id[0..12]
         );
 
         let mp = MultiProgress::new();
@@ -322,7 +386,6 @@ impl ImageBuilder {
 
         pg1.set_style(sty1);
         pg2.set_style(sty2);
-
 
         docker
             .logs::<String>(
@@ -406,11 +469,31 @@ impl ImageBuilder {
                 }
             }
         }
-        let file_length = fs::metadata(&path)?.len();
-        if file_length != 0 {
-            println!(" -- Output gvmi image size: {} ({}), path: {}", humansize::format_size(file_length, FormatSizeOptions::default()), file_length, path);
-        }
 
+        print!("* Step8 - Adding metadata...");
+        //        let hash = cont.id.ok_or(anyhow!("Container has no id"))?;
+
+        let cfg = cont.config.ok_or(anyhow!("Container has no config"))?;
+
+        let mut meta_cfg = cfg.clone();
+        //meta_cfg.hostname = Some("".to_string());
+        meta_cfg.domainname = Some("".to_string());
+        meta_cfg.user = None;
+
+        let bytes = add_metadata_outside(&PathBuf::from(&path), &meta_cfg).await?;
+        let conf = read_metadata_outside(&PathBuf::from(&path)).await?;
+        log::debug!("conf :: {:?}", conf);
+        println!(" -- container metadata ({} bytes) added", bytes);
+        let file_length = fs::metadata(&path)?.len();
+        if file_length == 0 {
+            return Err(anyhow!("Output gvmi image is empty"));
+        }
+        println!(
+            " -- Output gvmi image size: {} ({} bytes), path: {}",
+            humansize::format_size(file_length, DECIMAL),
+            file_length,
+            &path
+        );
         Ok(())
     }
 }
@@ -605,7 +688,10 @@ fn add_metadata_inside(
     Ok(())
 }
 
-fn add_metadata_outside(image_path: &Path, config: &ContainerConfig) -> anyhow::Result<()> {
+async fn add_metadata_outside(
+    image_path: &Path,
+    config: &ContainerConfig,
+) -> anyhow::Result<usize> {
     let mut json_buf = RWBuffer::new();
     serde_json::to_writer(&mut json_buf, config)?;
     let mut file = fs::OpenOptions::new().append(true).open(image_path)?;
@@ -617,10 +703,54 @@ fn add_metadata_outside(image_path: &Path, config: &ContainerConfig) -> anyhow::
         digest.update(&json_buf.bytes);
         digest.finalize()
     };
-    let mut _bytes_written = file.write(&crc.to_le_bytes())?;
-    _bytes_written += file.write(&json_buf.bytes)?;
-    _bytes_written += file.write(format!("{meta_size:08}").as_bytes())?;
-    Ok(())
+    println!("json: {}", String::from_utf8_lossy(&json_buf.bytes));
+    let mut bytes_written = file.write(&crc.to_le_bytes())?;
+    bytes_written += file.write(&json_buf.bytes)?;
+    bytes_written += file.write(format!("{meta_size:08}").as_bytes())?;
+    Ok(bytes_written)
+}
+
+async fn read_metadata_outside(image_path: &Path) -> anyhow::Result<ContainerConfig> {
+    const META_SIZE_BYTES: usize = 8;
+    const CRC_BYTES: usize = 4;
+
+    //obtain position of meta data by checking last bytes of file
+    let mut file = fs::OpenOptions::new().read(true).open(image_path)?;
+    file.seek(SeekFrom::End(0))?;
+    let file_size = file.stream_position()?;
+    if file_size < (META_SIZE_BYTES + CRC_BYTES) as u64 {
+        return Err(anyhow!("File is too small"));
+    }
+
+    //read metadata from end of the file
+    file.seek(SeekFrom::End(-(META_SIZE_BYTES as i64)))?;
+    let mut buf = [0; META_SIZE_BYTES as usize];
+    file.read_exact(&mut buf)?;
+    //parse from dec string
+    let meta_size = u64::from_str_radix(std::str::from_utf8(&buf).unwrap(), 10).unwrap();
+    if meta_size + (META_SIZE_BYTES + CRC_BYTES) as u64 > file_size {
+        return Err(anyhow!("File is too small"));
+    }
+    file.seek(SeekFrom::End(
+        -((META_SIZE_BYTES + CRC_BYTES + meta_size as usize) as i64),
+    ))?;
+    let mut crc_buf = [0; CRC_BYTES];
+    file.read_exact(&mut crc_buf)?;
+    let mut json_buf = vec![0; meta_size as usize];
+    file.read_exact(&mut json_buf)?;
+    let crc = {
+        //CRC_32_ISO_HDLC is another name of CRC-32-IEEE which was used in previous version of crc
+        let crc_algo = Crc::<u32>::new(&CRC_32_ISO_HDLC);
+        let mut digest = crc_algo.digest();
+        digest.update(&json_buf);
+        digest.finalize()
+    };
+    let crc_read = u32::from_le_bytes(crc_buf);
+    if crc != crc_read {
+        return Err(anyhow!("CRC mismatch"));
+    }
+    let cfg = serde_json::from_slice::<ContainerConfig>(&json_buf)?;
+    Ok(cfg)
 }
 
 /*

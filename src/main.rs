@@ -23,6 +23,8 @@ struct CmdArgs {
     /// Output image name
     #[arg(short, long)]
     output: Option<String>,
+    #[arg(short, long)]
+    force: bool,
     /// Upload image to repository
     #[arg(short, long)]
     push: bool,
@@ -53,6 +55,7 @@ async fn main() -> anyhow::Result<()> {
     let builder = ImageBuilder::new(
         &cmdargs.image_name,
         cmdargs.output,
+        cmdargs.force,
         cmdargs.env,
         cmdargs.vol,
         cmdargs.entrypoint,
