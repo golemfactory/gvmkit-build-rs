@@ -44,8 +44,11 @@ struct CmdArgs {
     /// Specify image entrypoint
     #[arg(short, long)]
     entrypoint: Option<String>,
+    /// Possible values: lzo, gzip, lz4, zstd, xz
     #[arg(long, default_value = "lzo")]
     compression_method: String,
+    /// Possible values: lzo [1-9] (default 8), gzip [1-9] (default 9), zstd [1-22] (default 15)
+    /// lz4 and xz do not support this option
     #[arg(long)]
     compression_level: Option<u32>,
 }
