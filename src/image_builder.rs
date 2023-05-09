@@ -37,6 +37,8 @@ pub struct ImageBuilder {
     env: Vec<String>,
     volumes: Vec<String>,
     entrypoint: Option<String>,
+    compression_method: String,
+    compression_level: Option<u32>,
 }
 
 impl ImageBuilder {
@@ -47,6 +49,8 @@ impl ImageBuilder {
         env: Vec<String>,
         volumes: Vec<String>,
         entrypoint: Option<String>,
+        compression_method: String,
+        compression_level: Option<u32>,
     ) -> Self {
         ImageBuilder {
             image_name: image_name.to_string(),
@@ -55,6 +59,8 @@ impl ImageBuilder {
             env,
             volumes,
             entrypoint,
+            compression_method,
+            compression_level,
         }
     }
 
@@ -146,7 +152,7 @@ impl ImageBuilder {
                     match ev.progress_detail {
                         Some(detail) => {
                             //log::info!(" -- {:?}", detail);
-                            pb.set_length(detail.total.unwrap_or(0) as u64);
+                            pb.set_length(detail.total.unwrap_or(1) as u64);
                             pb.set_position(detail.current.unwrap_or(0) as u64);
                         }
                         None => {}
@@ -218,7 +224,7 @@ impl ImageBuilder {
                     }
                 }
                 Err(err) => {
-                    return Err(anyhow::anyhow!("Failed to read metadata from GVMI image: {}", path.display()));
+                    println!(" -- Failed to read metadata from GVMI image: {}", path.display());
                 }
             }
         }
@@ -258,7 +264,7 @@ impl ImageBuilder {
 
         println!(" -- Container id: {}", &container_id[0..12]);
 
-        let tool_image_name = "prekucki/squashfs-tools:latest";
+        let tool_image_name = "scx1332/squashfs";
         println!(
             "* Step4 - create tool container used for gvmi generation: {} ...",
             tool_image_name
@@ -288,26 +294,32 @@ impl ImageBuilder {
         };
 
         let copy_result: anyhow::Result<_> = async {
+            let mut mksquash_command = vec![
+                "mksquashfs".to_string(),
+                "/work/in".to_string(),
+                "/work/out/image.squashfs".to_string(),
+                "-info".to_string(),
+                "-comp".to_string(),
+                self.compression_method.clone(),
+                "-noappend".to_string(),
+            ];
+            if let Some(compression_level) = self.compression_level {
+                mksquash_command.push("-Xcompression-level".to_string());
+                mksquash_command.push(compression_level.to_string());
+            }
+
             let tool_container = docker
-                .create_container::<String, &'static str>(
+                .create_container::<String, String>(
                     None,
                     container::Config {
-                        image: Some(tool_image_name),
-                        cmd: Some(vec![
-                            "mksquashfs",
-                            "/work/in",
-                            "/work/out/image.squashfs",
-                            "-info",
-                            "-comp",
-                            "lzo",
-                            "-noappend",
-                        ]),
+                        image: Some(tool_image_name.to_string()),
+                        cmd: Some(mksquash_command),
                         attach_stderr: Some(true),
                         attach_stdout: Some(true),
                         host_config: Some(HostConfig {
                             auto_remove: Some(true),
                             mounts: Some(vec![Mount {
-                                target: Some("/work/out/image.squashfs".into()),
+                                target: Some("/work/out/image.squashfs".to_string()),
                                 source: Some(path.clone()),
                                 typ: Some(MountTypeEnum::BIND),
                                 ..Default::default()
@@ -703,7 +715,6 @@ async fn add_metadata_outside(
         digest.update(&json_buf.bytes);
         digest.finalize()
     };
-    println!("json: {}", String::from_utf8_lossy(&json_buf.bytes));
     let mut bytes_written = file.write(&crc.to_le_bytes())?;
     bytes_written += file.write(&json_buf.bytes)?;
     bytes_written += file.write(format!("{meta_size:08}").as_bytes())?;
@@ -727,7 +738,7 @@ async fn read_metadata_outside(image_path: &Path) -> anyhow::Result<ContainerCon
     let mut buf = [0; META_SIZE_BYTES as usize];
     file.read_exact(&mut buf)?;
     //parse from dec string
-    let meta_size = u64::from_str_radix(std::str::from_utf8(&buf).unwrap(), 10).unwrap();
+    let meta_size = u64::from_str_radix(std::str::from_utf8(&buf)?, 10)?;
     if meta_size + (META_SIZE_BYTES + CRC_BYTES) as u64 > file_size {
         return Err(anyhow!("File is too small"));
     }

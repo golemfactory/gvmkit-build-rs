@@ -19,6 +19,8 @@ use std::time::Duration;
 const INTERNAL_LOG_LEVEL: &str = "hyper=warn,bollard=warn";
 const DEFAULT_LOG_LEVEL: &str = "info";
 
+const COMPRESSION_POSSIBLE_VALUES: &[&str] = &["lzo", "gzip", "lz4", "zstd"];
+
 #[derive(Parser, Debug)]
 #[command(author, version, about, long_about = None)]
 struct CmdArgs {
@@ -41,6 +43,12 @@ struct CmdArgs {
     entrypoint: Option<String>,
     /// Input Docker image name
     image_name: String, // positional
+
+    #[arg(long, default_value = "lzo")]
+    compression_method: String,
+    #[arg(long)]
+    compression_level: Option<u32>,
+
 }
 use console::{style, Emoji};
 use indicatif::{HumanDuration, MultiProgress, ProgressBar};
@@ -57,6 +65,7 @@ async fn main() -> anyhow::Result<()> {
 
     let cmdargs = <CmdArgs as Parser>::parse();
 
+
     let builder = ImageBuilder::new(
         &cmdargs.image_name,
         cmdargs.output,
@@ -64,6 +73,8 @@ async fn main() -> anyhow::Result<()> {
         cmdargs.env,
         cmdargs.vol,
         cmdargs.entrypoint,
+        cmdargs.compression_method,
+        cmdargs.compression_level,
     );
 
     let spinner_style = ProgressStyle::with_template("{prefix:.bold.dim} {spinner} {wide_msg}")
