@@ -313,6 +313,7 @@ impl ImageBuilder {
                 mksquash_command.push("-Xcompression-level".to_string());
                 mksquash_command.push(compression_level.to_string());
             }
+            println!(" -- Image command: {}", mksquash_command.join(" "));
 
             let tool_container = docker
                 .create_container::<String, String>(
