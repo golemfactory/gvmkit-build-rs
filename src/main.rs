@@ -1,20 +1,20 @@
 extern crate core;
 
+mod chunks;
 mod docker;
 mod image_builder;
 mod progress;
 mod rwbuf;
 mod upload;
 mod wrapper;
-mod chunks;
 
 use crate::image_builder::ImageBuilder;
 
 use clap::Parser;
 use indicatif::ProgressStyle;
-use std::{env, fs};
 use std::path::{Path, PathBuf};
 use std::time::Duration;
+use std::{env, fs};
 
 const INTERNAL_LOG_LEVEL: &str = "hyper=warn,bollard=warn";
 const DEFAULT_LOG_LEVEL: &str = "info";
@@ -48,7 +48,6 @@ struct CmdArgs {
     compression_method: String,
     #[arg(long)]
     compression_level: Option<u32>,
-
 }
 use console::{style, Emoji};
 use indicatif::{HumanDuration, MultiProgress, ProgressBar};
@@ -64,7 +63,6 @@ async fn main() -> anyhow::Result<()> {
     env_logger::init();
 
     let cmdargs = <CmdArgs as Parser>::parse();
-
 
     let builder = ImageBuilder::new(
         &cmdargs.image_name,
@@ -97,7 +95,6 @@ async fn main() -> anyhow::Result<()> {
         file.write(&serde_json::to_vec_pretty(&descr)?).await?;
         println!(" -- file descriptor created successfully");
     }
-
 
     if cmdargs.push {
         // upload::upload_image(&cmdargs.output).await?;

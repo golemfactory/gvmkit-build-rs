@@ -1,7 +1,7 @@
-use std::path::Path;
 use indicatif::{ProgressBar, ProgressStyle};
 use serde::Serialize;
-use sha2::{Sha256, Digest};
+use sha2::{Digest, Sha256};
+use std::path::Path;
 use tokio::fs::File;
 use tokio::io::AsyncReadExt;
 
@@ -63,4 +63,3 @@ pub async fn createDescriptor(path: &Path, chunk_size: usize) -> anyhow::Result<
     file_description.sha256 = hex::encode(sha256.finalize());
     Ok(file_description)
 }
-

@@ -193,7 +193,6 @@ impl ImageBuilder {
             humansize::format_size(image_size as u64, DECIMAL)
         );
 
-
         let path = if let Some(path) = &self.output {
             path.clone()
         } else {
@@ -213,7 +212,10 @@ impl ImageBuilder {
                     if let Some(image_left) = meta_out.image {
                         if image_left == image_id {
                             if self.force_overwrite {
-                                println!(" -- GVMI image already exists - overwriting: {}", path.display());
+                                println!(
+                                    " -- GVMI image already exists - overwriting: {}",
+                                    path.display()
+                                );
                             } else {
                                 println!(" -- GVMI image already exists: {}", path.display());
                                 return Ok(PathBuf::from(path));
@@ -224,7 +226,10 @@ impl ImageBuilder {
                     }
                 }
                 Err(err) => {
-                    println!(" -- Failed to read metadata from GVMI image: {}", path.display());
+                    println!(
+                        " -- Failed to read metadata from GVMI image: {}",
+                        path.display()
+                    );
                 }
             }
         }
@@ -233,7 +238,8 @@ impl ImageBuilder {
             return Err(anyhow::anyhow!("Failed to create output file: {}", err));
         }
 
-        let path = path.canonicalize()?
+        let path = path
+            .canonicalize()?
             .display()
             .to_string()
             .replace(r"\\?\", ""); // strip \\?\ prefix on windows
