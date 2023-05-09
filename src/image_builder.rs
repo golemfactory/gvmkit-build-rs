@@ -58,7 +58,7 @@ impl ImageBuilder {
         }
     }
 
-    pub async fn build(&self) -> anyhow::Result<()> {
+    pub async fn build(&self) -> anyhow::Result<PathBuf> {
         use bollard::{
             image,
             service::{HostConfig, Mount, MountTypeEnum},
@@ -210,7 +210,7 @@ impl ImageBuilder {
                                 println!(" -- GVMI image already exists - overwriting: {}", path.display());
                             } else {
                                 println!(" -- GVMI image already exists: {}", path.display());
-                                return Ok(());
+                                return Ok(PathBuf::from(path));
                             }
                         } else {
                             println!(" -- GVMI image id mismatch: {}", path.display());
@@ -494,7 +494,7 @@ impl ImageBuilder {
             file_length,
             &path
         );
-        Ok(())
+        Ok(PathBuf::from(&path))
     }
 }
 

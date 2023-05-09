@@ -6,12 +6,14 @@ mod progress;
 mod rwbuf;
 mod upload;
 mod wrapper;
+mod chunks;
 
 use crate::image_builder::ImageBuilder;
 
 use clap::Parser;
 use indicatif::ProgressStyle;
-use std::env;
+use std::{env, fs};
+use std::path::Path;
 use std::time::Duration;
 
 const INTERNAL_LOG_LEVEL: &str = "hyper=warn,bollard=warn";
@@ -42,6 +44,9 @@ struct CmdArgs {
 }
 use console::{style, Emoji};
 use indicatif::{HumanDuration, MultiProgress, ProgressBar};
+use tokio::fs::File;
+use tokio::io::AsyncWriteExt;
+
 static LOOKING_GLASS: Emoji<'_, '_> = Emoji("🔍  ", "");
 #[tokio::main(flavor = "current_thread")]
 async fn main() -> anyhow::Result<()> {
@@ -72,7 +77,16 @@ async fn main() -> anyhow::Result<()> {
     );
     let deps = 1232;
 
-    builder.build().await?;
+    let path = builder.build().await?;
+    let descr_path = path.with_extension("chunks.json");
+    {
+        println!(" * Writing file descriptor to {}", descr_path.display());
+        let mut file = File::create(&descr_path).await?;
+        let descr = chunks::createDescriptor(&path, 1000 * 1000 * 10).await?;
+        file.write(&serde_json::to_vec_pretty(&descr)?).await?;
+        println!(" -- file descriptor created successfully");
+    }
+
 
     if cmdargs.push {
         // upload::upload_image(&cmdargs.output).await?;
