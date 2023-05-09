@@ -24,9 +24,12 @@ const COMPRESSION_POSSIBLE_VALUES: &[&str] = &["lzo", "gzip", "lz4", "zstd"];
 #[derive(Parser, Debug)]
 #[command(author, version, about, long_about = None)]
 struct CmdArgs {
+    /// Input Docker image name
+    image_name: String,
     /// Output image name
     #[arg(short, long)]
     output: Option<String>,
+    /// Force overwriting existing image, even if it matches image
     #[arg(short, long)]
     force: bool,
     /// Upload image to repository
@@ -41,9 +44,6 @@ struct CmdArgs {
     /// Specify image entrypoint
     #[arg(short, long)]
     entrypoint: Option<String>,
-    /// Input Docker image name
-    image_name: String, // positional
-
     #[arg(long, default_value = "lzo")]
     compression_method: String,
     #[arg(long)]
