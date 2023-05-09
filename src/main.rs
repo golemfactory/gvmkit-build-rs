@@ -13,7 +13,7 @@ use crate::image_builder::ImageBuilder;
 use clap::Parser;
 use indicatif::ProgressStyle;
 use std::{env, fs};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 const INTERNAL_LOG_LEVEL: &str = "hyper=warn,bollard=warn";
@@ -89,7 +89,7 @@ async fn main() -> anyhow::Result<()> {
     let deps = 1232;
 
     let path = builder.build().await?;
-    let descr_path = path.with_extension("chunks.json");
+    let descr_path = PathBuf::from(path.display().to_string() + "chunks.json");
     {
         println!(" * Writing file descriptor to {}", descr_path.display());
         let mut file = File::create(&descr_path).await?;
