@@ -2,6 +2,7 @@ use std::env;
 
 use futures::SinkExt;
 
+use indicatif::{ProgressBar, ProgressStyle};
 use sha3::Digest;
 use std::path::Path;
 
@@ -9,6 +10,8 @@ use reqwest::{multipart, Body};
 
 use tokio::fs::File;
 
+use crate::chunks::FileChunkDesc;
+use crate::wrapper::{stream_file_with_progress, ProgressContext};
 use trust_dns_resolver::config::{ResolverConfig, ResolverOpts};
 use trust_dns_resolver::TokioAsyncResolver;
 
@@ -36,6 +39,7 @@ async fn resolve_repo() -> anyhow::Result<String> {
         srv.port()
     );
 
+    /*
     let client = awc::Client::new();
     let response = client
         .get(format!("{base_url}/status"))
@@ -48,7 +52,7 @@ async fn resolve_repo() -> anyhow::Result<String> {
             "Repository status check failed with code {}",
             response.status().as_u16()
         ));
-    }
+    }*/
     Ok(base_url)
 }
 
@@ -59,42 +63,32 @@ fn file_to_body(file: File) -> Body {
     body
 }
 
-pub async fn push_image(file_path: &Path) -> anyhow::Result<()> {
-    //let file_path = PathBuf::from(file_path);
+fn chunk_to_body(file: File, range: Option<std::ops::Range<usize>>) -> Body {
+    use tokio_util::codec::{BytesCodec, FramedRead};
+    let stream = FramedRead::new(file, BytesCodec::new());
+    let body = Body::wrap_stream(stream);
+    body
+}
 
+pub async fn push_descr(file_path: &Path) -> anyhow::Result<()> {
     let repo_url = resolve_repo().await?;
     println!("Uploading image to: {}", repo_url);
     let file = tokio::fs::File::open(&file_path).await?;
-    /*
-        let file_name = file_path.file_name().ok_or_else(|| anyhow::anyhow!("No filename in path: {}", file_path.display()))?;
-        let file_size = file
-            .metadata()
-            .await?
-            .len();
-
-
-
-        let (mut tx, rx) = mpsc::channel::<Result<Bytes, awc::error::HttpError>>(1);
-
-        let reader_task = tokio::spawn(async move {
-            let mut buf = [0; 1024 * 64];
-            let mut reader = BufReader::new(file);
-
-            while let Ok(read) = reader.read(&mut buf[..]).await {
-                if read == 0 {
-                    break;
-                }
-                if let Err(e) = tx.send(Ok(Bytes::from(buf[..read].to_vec()))).await {
-                    log::error!("Error uploading image: {}", e);
-                }
-            }
-        });
-    */
     let descr_endpoint = format!("{repo_url}/v1/image/push/descr").replace("//v1", "/v1");
     println!("Uploading image to: {}", descr_endpoint);
     let client = reqwest::Client::new();
     let form = multipart::Form::new();
-    let some_file = multipart::Part::stream(file_to_body(file))
+    let pc = ProgressContext::new();
+    let pb = ProgressBar::new(1);
+    let sty = ProgressStyle::with_template("[{msg:20}] {wide_bar:.cyan/blue} {pos:9}/{len:9}")
+        .unwrap()
+        .progress_chars("##-");
+
+    pb.set_style(sty.clone());
+
+    let file_stream = stream_file_with_progress(file_path, None, &pb, pc).await?;
+    let body = Body::wrap_stream(file_stream);
+    let some_file = multipart::Part::stream(body)
         .file_name("descriptor.txt")
         .mime_str("application/octet-stream")?;
     let form = form.part("file", some_file);
@@ -123,6 +117,75 @@ pub async fn push_image(file_path: &Path) -> anyhow::Result<()> {
             Err(e)
         }
     }
+}
+
+pub async fn push_chunks(file_path: &Path, file_descr: &Path) -> anyhow::Result<()> {
+    let file_descr = tokio::fs::read_to_string(file_descr).await?;
+    let file_descr = serde_json::from_str::<FileChunkDesc>(&file_descr)?;
+
+    for (chunk_no, chunk) in file_descr.chunks.iter().enumerate() {
+        let repo_url = resolve_repo().await?;
+        println!("Uploading image to: {}", repo_url);
+        let descr_endpoint = format!("{repo_url}/v1/image/push/chunk").replace("//v1", "/v1");
+        println!("Uploading image to: {}", descr_endpoint);
+        let client = reqwest::Client::new();
+        let form = multipart::Form::new();
+        let form = form.text("chunk-no", chunk_no.to_string());
+        let form = form.text("chunk-sha", chunk.sha256.to_string());
+        let form = form.text("chunk-pos", chunk.pos.to_string());
+        let form = form.text("chunk-len", chunk.len.to_string());
+        let form = form.text("image-sha", file_descr.sha256.to_string());
+        let pc = ProgressContext::new();
+        let pb = ProgressBar::new(1);
+        let sty = ProgressStyle::with_template("[{msg:20}] {wide_bar:.cyan/blue} {pos:9}/{len:9}")
+            .unwrap()
+            .progress_chars("##-");
+
+        pb.set_style(sty.clone());
+        let chunk_stream = stream_file_with_progress(
+            file_path,
+            Some(std::ops::Range {
+                start: chunk.pos as usize,
+                end: (chunk.pos + chunk.len) as usize,
+            }),
+            &pb,
+            pc,
+        )
+        .await?;
+        let body = Body::wrap_stream(chunk_stream);
+        let some_file = multipart::Part::stream(body)
+            .file_name("descriptor.txt")
+            .mime_str("application/octet-stream")?;
+
+        let form = form.part("file", some_file);
+
+        let res = client
+            .post(descr_endpoint)
+            .multipart(form)
+            .send()
+            .await
+            .map_err(|e| anyhow::anyhow!("Image upload error: {}", e));
+
+        match res {
+            Ok(res) => {
+                if res.status().is_success() {
+                    println!("Image uploaded successfully");
+                } else {
+                    let status = res.status();
+                    log::error!("Image upload failed with code {}", res.text().await.unwrap_or("".to_string()));
+                    return Err(anyhow::anyhow!(
+                        "Image upload failed with code {}",
+                        status.as_u16()
+                    ));
+                }
+            }
+            Err(e) => {
+                println!("Image upload failed: {}", e);
+                return Err(e);
+            }
+        }
+    }
+    Ok(())
 }
 /*
 pub async fn upload_image<P: AsRef<Path>>(file_path: P) -> anyhow::Result<()> {

@@ -1,8 +1,12 @@
 use bytes::Bytes;
 use futures_util::StreamExt;
 use futures_util::{stream, Stream};
+use std::io::SeekFrom;
+use std::path::Path;
 
 use std::sync::{Arc, Mutex};
+use tokio::fs::File;
+use tokio::io::{AsyncReadExt, AsyncSeekExt};
 
 struct ProgressContextInner {
     bytes_total: u64,
@@ -74,4 +78,49 @@ pub fn stream_with_progress(
             }
         }
     })
+}
+
+pub async fn stream_file_with_progress(
+    file_in: &Path,
+    chunk: Option<std::ops::Range<usize>>,
+    pb: &indicatif::ProgressBar,
+    pc: ProgressContext,
+) -> anyhow::Result<impl Stream<Item = Result<Bytes, anyhow::Error>>> {
+    let pb = pb.clone();
+
+    let mut file = File::open(file_in).await?;
+    let file_size = file.metadata().await?.len();
+    let bytes_to_read = if let Some(range) = chunk {
+        if range.end as u64 > file_size {
+            log::error!("Range end is greater than file size");
+            return Err(anyhow::anyhow!("Range end is greater than file size"));
+        }
+        file.seek(SeekFrom::Start(range.start as u64)).await?;
+        range.end - range.start
+    } else {
+        file_size as usize
+    };
+
+    pb.set_length(bytes_to_read as u64);
+    let res = stream::unfold((file, bytes_to_read), move |(mut file, bytes_to_read)| {
+        let pb = pb.clone();
+        let pc = pc.clone();
+        async move {
+            if bytes_to_read == 0 {
+                return None;
+            }
+            //println!("Bytes to read: {}", bytes_to_read);
+            let current_read_size = std::cmp::min(bytes_to_read, 10000);
+            tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+            let mut buf = vec![0u8; current_read_size];
+            let bytes_read = file.read_exact(&mut buf).await.unwrap();
+            let bytes = Bytes::from(buf);
+            pb.inc(bytes_read as u64);
+            Some((
+                Ok::<Bytes, anyhow::Error>(bytes),
+                (file, bytes_to_read - bytes_read),
+            ))
+        }
+    });
+    Ok(res)
 }

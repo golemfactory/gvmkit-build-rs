@@ -54,6 +54,7 @@ struct CmdArgs {
 }
 use console::{style, Emoji};
 
+use crate::chunks::FileChunkDesc;
 use tokio::fs::File;
 use tokio::io::AsyncWriteExt;
 
@@ -101,13 +102,14 @@ async fn main() -> anyhow::Result<()> {
     {
         println!(" * Writing file descriptor to {}", descr_path.display());
         let mut file = File::create(&descr_path).await?;
-        let descr = chunks::create_descriptor(&path, 1000 * 1000 * 10).await?;
+        let descr = chunks::create_descriptor(&path, 1000 * 1000 * 1).await?;
         file.write_all(&serde_json::to_vec_pretty(&descr)?).await?;
         println!(" -- file descriptor created successfully");
     }
 
     if cmdargs.push {
-        upload::push_image(&descr_path).await?;
+        upload::push_descr(&descr_path).await?;
+        upload::push_chunks(&path, &descr_path).await?;
     }
 
     Ok(())
