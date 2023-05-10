@@ -12,9 +12,9 @@ use crate::image_builder::ImageBuilder;
 
 use clap::Parser;
 use indicatif::ProgressStyle;
-use std::path::{Path, PathBuf};
-use std::time::Duration;
-use std::{env, fs};
+use std::path::PathBuf;
+
+use std::env;
 
 const INTERNAL_LOG_LEVEL: &str = "hyper=warn,bollard=warn";
 const DEFAULT_LOG_LEVEL: &str = "info";
@@ -53,7 +53,7 @@ struct CmdArgs {
     compression_level: Option<u32>,
 }
 use console::{style, Emoji};
-use indicatif::{HumanDuration, MultiProgress, ProgressBar};
+
 use tokio::fs::File;
 use tokio::io::AsyncWriteExt;
 
@@ -78,7 +78,7 @@ async fn main() -> anyhow::Result<()> {
         cmdargs.compression_level,
     );
 
-    let spinner_style = ProgressStyle::with_template("{prefix:.bold.dim} {spinner} {wide_msg}")
+    let _spinner_style = ProgressStyle::with_template("{prefix:.bold.dim} {spinner} {wide_msg}")
         .unwrap()
         .tick_chars("⠁⠂⠄⡀⢀⠠⠐⠈ ");
 
@@ -87,7 +87,7 @@ async fn main() -> anyhow::Result<()> {
         style("[1/4]").bold().dim(),
         LOOKING_GLASS
     );
-    let deps = 1232;
+    let _deps = 1232;
 
     let path = builder.build().await?;
     let descr_path = PathBuf::from(path.display().to_string() + "chunks.json");

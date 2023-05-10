@@ -6,7 +6,7 @@ use futures::channel::{mpsc, oneshot};
 use futures::SinkExt;
 use hex::ToHex;
 use sha3::Digest;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 use std::sync::Arc;
 use tokio::io::{AsyncReadExt, BufReader};

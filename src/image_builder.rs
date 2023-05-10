@@ -7,8 +7,6 @@ use std::{
     path::{Path, PathBuf},
 };
 
-use crate::docker::ContainerOptions;
-use crate::progress::{from_progress_output, Progress, ProgressResult, Spinner, SpinnerResult};
 use crate::rwbuf::RWBuffer;
 
 use bollard::container;
@@ -20,11 +18,10 @@ use crate::wrapper::{stream_with_progress, ProgressContext};
 use anyhow::anyhow;
 use bollard::service::ContainerConfig;
 use crc::{Crc, CRC_32_ISO_HDLC};
-use futures_util::{stream, Stream, TryStreamExt};
-use humansize::{FormatSizeOptions, DECIMAL};
+use futures_util::TryStreamExt;
+use humansize::DECIMAL;
 use indicatif::{MultiProgress, ProgressBar, ProgressStyle};
-use serde_json::json;
-use std::rc::Rc;
+
 use std::sync::Arc;
 use tokio::sync::Mutex;
 
@@ -225,7 +222,7 @@ impl ImageBuilder {
                         }
                     }
                 }
-                Err(err) => {
+                Err(_err) => {
                     println!(
                         " -- Failed to read metadata from GVMI image: {}",
                         path.display()
@@ -346,7 +343,7 @@ impl ImageBuilder {
                 &tool_container.id[0..12]
             );
 
-            let mut input = docker.download_from_container(
+            let input = docker.download_from_container(
                 &container_id,
                 Some(DownloadFromContainerOptions { path: "/" }),
             );

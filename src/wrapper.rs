@@ -1,8 +1,7 @@
 use bytes::Bytes;
 use futures_util::StreamExt;
 use futures_util::{stream, Stream};
-use std::rc::Rc;
-use std::sync::atomic::AtomicU64;
+
 use std::sync::{Arc, Mutex};
 
 struct ProgressContextInner {
