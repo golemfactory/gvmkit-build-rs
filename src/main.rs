@@ -107,7 +107,7 @@ async fn main() -> anyhow::Result<()> {
     }
 
     if cmdargs.push {
-        upload::push_image(&path).await?;
+        upload::push_image(&descr_path).await?;
     }
 
     Ok(())

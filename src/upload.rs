@@ -1,19 +1,14 @@
-use crate::progress::{Progress, ProgressResult, Spinner, SpinnerResult};
 use std::env;
 
-use anyhow::Context;
-use bytes::Bytes;
-use futures::channel::{mpsc, oneshot};
 use futures::SinkExt;
-use hex::ToHex;
+
 use sha3::Digest;
 use std::path::Path;
 
 use reqwest::{multipart, Body};
-use std::sync::Arc;
+
 use tokio::fs::File;
-use tokio::io::{AsyncReadExt, BufReader};
-use tokio::task;
+
 use trust_dns_resolver::config::{ResolverConfig, ResolverOpts};
 use trust_dns_resolver::TokioAsyncResolver;
 
@@ -58,7 +53,6 @@ async fn resolve_repo() -> anyhow::Result<String> {
 }
 
 fn file_to_body(file: File) -> Body {
-    use futures::stream::TryStreamExt;
     use tokio_util::codec::{BytesCodec, FramedRead};
     let stream = FramedRead::new(file, BytesCodec::new());
     let body = Body::wrap_stream(stream);
@@ -96,40 +90,22 @@ pub async fn push_image(file_path: &Path) -> anyhow::Result<()> {
             }
         });
     */
-    //AWC needs single threaded runtime to run properly, so spawn local set
-    let res = task::LocalSet::new()
-        .run_until({
-            async move {
-                let descr_endpoint =
-                    format!("{repo_url}/v1/image/push/descr").replace("//v1", "/v1");
-                println!("Uploading image to: {}", descr_endpoint);
-                let client = reqwest::Client::new();
-                let form = multipart::Form::new();
-                let some_file = multipart::Part::stream(file_to_body(file))
-                    .file_name("gitignore.txt")
-                    .mime_str("text/plain")?;
-                let form = form.part("file", some_file);
+    let descr_endpoint = format!("{repo_url}/v1/image/push/descr").replace("//v1", "/v1");
+    println!("Uploading image to: {}", descr_endpoint);
+    let client = reqwest::Client::new();
+    let form = multipart::Form::new();
+    let some_file = multipart::Part::stream(file_to_body(file))
+        .file_name("descriptor.txt")
+        .mime_str("application/octet-stream")?;
+    let form = form.part("file", some_file);
 
-                let res = client
-                    .post(descr_endpoint)
-                    .multipart(form)
-                    .send()
-                    .await
-                    .map_err(|e| anyhow::anyhow!("Image upload error: {}", e))?;
+    let res = client
+        .post(descr_endpoint)
+        .multipart(form)
+        .send()
+        .await
+        .map_err(|e| anyhow::anyhow!("Image upload error: {}", e));
 
-                //let client = awc::Client::builder().finish();
-                /*let res = client
-                .post(descr_endpoint)
-                .send_json(&serde_json::json!({
-                    "filename": file_name.to_string_lossy(),
-                    "size": file_size,
-                }))
-                .await
-                .map_err(|e| anyhow::anyhow!("Image upload error: {}", e))?;*/
-                Ok::<_, anyhow::Error>(res)
-            }
-        })
-        .await;
     match res {
         Ok(res) => {
             if res.status().is_success() {
