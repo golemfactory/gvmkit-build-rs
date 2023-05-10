@@ -61,6 +61,7 @@ lazy_static::lazy_static! {
     static ref PERCENT_REGEX: Regex = Regex::new(r"\d+%").unwrap();
 }
 
+/*
 pub(crate) fn set_total_steps(count: usize) {
     *(TOTAL_STEPS.lock().unwrap()) = count;
 }
@@ -71,7 +72,7 @@ pub(crate) fn from_progress_output<S: AsRef<str>>(src: S) -> Option<usize> {
         .map(|m| src.as_ref()[m.start()..m.end()].trim_end_matches('%'))
         .and_then(|s| s.parse().ok())
 }
-
+*/
 pub(crate) struct Progress {
     inner: ProgressBar,
 }
@@ -97,11 +98,11 @@ impl Progress {
         progress.inner.set_style(PROGRESS_ETA_STYLE.clone());
         progress
     }
-
-    pub fn position(&self) -> u64 {
-        self.inner.position()
-    }
-
+    /*
+        pub fn position(&self) -> u64 {
+            self.inner.position()
+        }
+    */
     pub fn inc(&self, delta: u64) {
         self.inner.inc(delta);
     }

@@ -1,4 +1,5 @@
 use crate::progress::{Progress, ProgressResult, Spinner, SpinnerResult};
+use std::env;
 
 use anyhow::Context;
 use bytes::Bytes;
@@ -8,16 +9,21 @@ use hex::ToHex;
 use sha3::Digest;
 use std::path::Path;
 
+use reqwest::{multipart, Body};
 use std::sync::Arc;
+use tokio::fs::File;
 use tokio::io::{AsyncReadExt, BufReader};
+use tokio::task;
 use trust_dns_resolver::config::{ResolverConfig, ResolverOpts};
 use trust_dns_resolver::TokioAsyncResolver;
 
-pub(crate) const STEPS: usize = 2;
 const PROTOCOL: &str = "http";
 const DOMAIN: &str = "dev.golem.network";
 
 async fn resolve_repo() -> anyhow::Result<String> {
+    if let Ok(repository_url) = env::var("REPOSITORY_URL") {
+        return Ok(repository_url);
+    }
     let resolver: TokioAsyncResolver =
         TokioAsyncResolver::tokio(ResolverConfig::google(), ResolverOpts::default())?;
 
@@ -51,82 +57,98 @@ async fn resolve_repo() -> anyhow::Result<String> {
     Ok(base_url)
 }
 
-pub async fn push_image(file_path: &Path) -> anyhow::Result<()> {
-    //let file_path = PathBuf::from(file_path);
-    let progress = Arc::new(Progress::with_eta(
-        format!("Uploading '{}'", file_path.display()),
-        0,
-    ));
-
-    let file = tokio::fs::File::open(&file_path)
-        .await
-        .with_context(|| format!("Failed to open file: {}", file_path.display()))
-        .progress_err(&progress)?;
-    let file_name = file_path
-        .file_name()
-        .ok_or_else(|| anyhow::anyhow!("No filename in path: {}", file_path.display()))
-        .progress_err(&progress)?
-        .to_string_lossy()
-        .to_string();
-    let file_size = file
-        .metadata()
-        .await
-        .with_context(|| format!("Failed to retrieve file metadata: {}", file_path.display()))
-        .progress_err(&progress)?
-        .len();
-
-    (*progress).set_total(file_size);
-
-    let repo_url = resolve_repo().await.progress_err(&progress)?;
-    log::debug!("Repository URL: {}", repo_url);
-
-    let (mut tx, rx) = mpsc::channel::<Result<Bytes, awc::error::HttpError>>(1);
-    let (htx, hrx) = oneshot::channel();
-
-    let progress_ = progress.clone();
-    tokio::spawn(async move {
-        let mut buf = [0; 1024 * 64];
-        let mut reader = BufReader::new(file);
-        let mut hasher = sha3::Sha3_224::new();
-
-        while let Ok(read) = reader.read(&mut buf[..]).await {
-            if read == 0 {
-                break;
-            }
-            if let Err(e) = tx.send(Ok(Bytes::from(buf[..read].to_vec()))).await {
-                log::error!("Error uploading image: {}", e);
-            }
-            hasher.update(&buf[..read]);
-            progress_.inc(read as u64);
-        }
-
-        if let Err(e) = htx.send(hasher.finalize().encode_hex()) {
-            log::error!("Error during hash finalization: {}", e);
-        }
-    });
-
-    let client = awc::Client::builder().disable_timeout().finish();
-    client
-        .put(format!("{repo_url}/upload/{file_name}"))
-        .send_stream(rx)
-        .await
-        .map_err(|e| anyhow::anyhow!("Image upload error: {}", e))
-        .progress_result(&progress)?;
-
-    let hash: String = hrx.await?;
-    let bytes = format!("{repo_url}/{file_name}").as_bytes().to_vec();
-    let spinner = Spinner::new(format!("Uploading link for {file_name}")).ticking();
-    client
-        .put(format!("{repo_url}/upload/image.{hash}.link"))
-        .send_body(bytes)
-        .await
-        .map_err(|e| anyhow::anyhow!("Image descriptor upload error: {e}"))
-        .spinner_result(&spinner)?;
-
-    println!("{hash}");
-    Ok(())
+fn file_to_body(file: File) -> Body {
+    use futures::stream::TryStreamExt;
+    use tokio_util::codec::{BytesCodec, FramedRead};
+    let stream = FramedRead::new(file, BytesCodec::new());
+    let body = Body::wrap_stream(stream);
+    body
 }
 
+pub async fn push_image(file_path: &Path) -> anyhow::Result<()> {
+    //let file_path = PathBuf::from(file_path);
+
+    let repo_url = resolve_repo().await?;
+    println!("Uploading image to: {}", repo_url);
+    let file = tokio::fs::File::open(&file_path).await?;
+    /*
+        let file_name = file_path.file_name().ok_or_else(|| anyhow::anyhow!("No filename in path: {}", file_path.display()))?;
+        let file_size = file
+            .metadata()
+            .await?
+            .len();
+
+
+
+        let (mut tx, rx) = mpsc::channel::<Result<Bytes, awc::error::HttpError>>(1);
+
+        let reader_task = tokio::spawn(async move {
+            let mut buf = [0; 1024 * 64];
+            let mut reader = BufReader::new(file);
+
+            while let Ok(read) = reader.read(&mut buf[..]).await {
+                if read == 0 {
+                    break;
+                }
+                if let Err(e) = tx.send(Ok(Bytes::from(buf[..read].to_vec()))).await {
+                    log::error!("Error uploading image: {}", e);
+                }
+            }
+        });
+    */
+    //AWC needs single threaded runtime to run properly, so spawn local set
+    let res = task::LocalSet::new()
+        .run_until({
+            async move {
+                let descr_endpoint =
+                    format!("{repo_url}/v1/image/push/descr").replace("//v1", "/v1");
+                println!("Uploading image to: {}", descr_endpoint);
+                let client = reqwest::Client::new();
+                let form = multipart::Form::new();
+                let some_file = multipart::Part::stream(file_to_body(file))
+                    .file_name("gitignore.txt")
+                    .mime_str("text/plain")?;
+                let form = form.part("file", some_file);
+
+                let res = client
+                    .post(descr_endpoint)
+                    .multipart(form)
+                    .send()
+                    .await
+                    .map_err(|e| anyhow::anyhow!("Image upload error: {}", e))?;
+
+                //let client = awc::Client::builder().finish();
+                /*let res = client
+                .post(descr_endpoint)
+                .send_json(&serde_json::json!({
+                    "filename": file_name.to_string_lossy(),
+                    "size": file_size,
+                }))
+                .await
+                .map_err(|e| anyhow::anyhow!("Image upload error: {}", e))?;*/
+                Ok::<_, anyhow::Error>(res)
+            }
+        })
+        .await;
+    match res {
+        Ok(res) => {
+            if res.status().is_success() {
+                println!("Image uploaded successfully");
+            } else {
+                return Err(anyhow::anyhow!(
+                    "Image upload failed with code {}",
+                    res.status().as_u16()
+                ));
+            }
+            Ok(())
+        }
+        Err(e) => {
+            println!("Image upload failed: {}", e);
+            Err(e)
+        }
+    }
+}
+/*
 pub async fn upload_image<P: AsRef<Path>>(file_path: P) -> anyhow::Result<()> {
     let file_path = file_path.as_ref();
     let progress = Arc::new(Progress::with_eta(
@@ -201,4 +223,4 @@ pub async fn upload_image<P: AsRef<Path>>(file_path: P) -> anyhow::Result<()> {
 
     println!("{hash}");
     Ok(())
-}
+}*/

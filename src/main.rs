@@ -19,7 +19,7 @@ use std::env;
 const INTERNAL_LOG_LEVEL: &str = "hyper=warn,bollard=warn";
 const DEFAULT_LOG_LEVEL: &str = "info";
 
-const COMPRESSION_POSSIBLE_VALUES: &[&str] = &["lzo", "gzip", "lz4", "zstd"];
+const COMPRESSION_POSSIBLE_VALUES: &[&str] = &["lzo", "gzip", "lz4", "zstd", "xz"];
 
 #[derive(Parser, Debug)]
 #[command(author, version, about, long_about = None)]
@@ -67,6 +67,13 @@ async fn main() -> anyhow::Result<()> {
 
     let cmdargs = <CmdArgs as Parser>::parse();
 
+    if !COMPRESSION_POSSIBLE_VALUES.contains(&cmdargs.compression_method.as_str()) {
+        return Err(anyhow::anyhow!(
+            "Not supported compression method: {}, possible values {}",
+            cmdargs.compression_method,
+            COMPRESSION_POSSIBLE_VALUES.join(", ")
+        ));
+    }
     let builder = ImageBuilder::new(
         &cmdargs.image_name,
         cmdargs.output,
@@ -94,13 +101,13 @@ async fn main() -> anyhow::Result<()> {
     {
         println!(" * Writing file descriptor to {}", descr_path.display());
         let mut file = File::create(&descr_path).await?;
-        let descr = chunks::createDescriptor(&path, 1000 * 1000 * 10).await?;
-        file.write(&serde_json::to_vec_pretty(&descr)?).await?;
+        let descr = chunks::create_descriptor(&path, 1000 * 1000 * 10).await?;
+        file.write_all(&serde_json::to_vec_pretty(&descr)?).await?;
         println!(" -- file descriptor created successfully");
     }
 
     if cmdargs.push {
-        upload::upload_image(&path).await?;
+        upload::push_image(&path).await?;
     }
 
     Ok(())

@@ -1,4 +1,3 @@
-use bytes::Bytes;
 use std::collections::HashMap;
 use std::io::{Read, Seek, SeekFrom};
 use std::{
@@ -25,8 +24,6 @@ use indicatif::{MultiProgress, ProgressBar, ProgressStyle};
 use std::sync::Arc;
 use tokio::sync::Mutex;
 
-pub(crate) const STEPS: usize = 4;
-
 pub struct ImageBuilder {
     image_name: String,
     output: Option<String>,
@@ -39,6 +36,7 @@ pub struct ImageBuilder {
 }
 
 impl ImageBuilder {
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         image_name: &str,
         output: Option<String>,
@@ -87,19 +85,19 @@ impl ImageBuilder {
             "* Step1 - create image from given name: {} ...",
             self.image_name
         );
-        let (tag_from_image_name, image_base_name) = if self.image_name.contains(":") {
+        let (tag_from_image_name, image_base_name) = if self.image_name.contains(':') {
             let tag = self
                 .image_name
-                .split(":")
+                .split(':')
                 .last()
                 .unwrap_or("latest")
                 .to_string();
-            if self.image_name.starts_with(":") {
+            if self.image_name.starts_with(':') {
                 return Err(anyhow::anyhow!("Invalid image name: {}", self.image_name));
             }
             let image_base_name = self
                 .image_name
-                .split(":")
+                .split(':')
                 .next()
                 .expect("It has to work")
                 .to_string();
@@ -152,7 +150,10 @@ impl ImageBuilder {
                             pb.set_length(detail.total.unwrap_or(1) as u64);
                             pb.set_position(detail.current.unwrap_or(0) as u64);
                         }
-                        None => {}
+                        None => {
+                            pb.set_length(1);
+                            pb.set_position(0);
+                        }
                     }
                 }
                 Ok(())
@@ -203,7 +204,7 @@ impl ImageBuilder {
 
         let path = Path::new(&path);
         if path.exists() {
-            let meta_out = read_metadata_outside(&path).await;
+            let meta_out = read_metadata_outside(path).await;
             match meta_out {
                 Ok(meta_out) => {
                     if let Some(image_left) = meta_out.image {
@@ -230,7 +231,7 @@ impl ImageBuilder {
                 }
             }
         }
-        if let Err(err) = fs::write(&path, "") {
+        if let Err(err) = fs::write(path, "") {
             log::error!("Failed to create output file: {} {}", path.display(), err);
             return Err(anyhow::anyhow!("Failed to create output file: {}", err));
         }
@@ -273,7 +274,7 @@ impl ImageBuilder {
             tool_image_name
         );
 
-        let _tool_image = match docker
+        match docker
             .create_image(
                 Some(image::CreateImageOptions {
                     from_image: tool_image_name,
@@ -426,10 +427,10 @@ impl ImageBuilder {
                                 let filename = spl.next();
                                 let value = spl
                                     .next()
-                                    .unwrap_or(&"0 bytes")
+                                    .unwrap_or("0 bytes")
                                     .split("bytes")
                                     .next()
-                                    .unwrap_or(&"0")
+                                    .unwrap_or("0")
                                     .trim()
                                     .parse::<u64>()
                                     .unwrap_or(0);
@@ -442,7 +443,7 @@ impl ImageBuilder {
                                         let mut split = part.split("file");
                                         split.next();
                                         let part2 = split.next().unwrap_or_default();
-                                        let part2 = part2.split(",").next().unwrap_or_default();
+                                        let part2 = part2.split(',').next().unwrap_or_default();
                                         pg2.set_message(part2.trim().to_string());
                                     }
                                 }
@@ -478,7 +479,7 @@ impl ImageBuilder {
                 println!(" -- Tool container finished");
             }
             Err(err) => {
-                if err.to_string().find("No such container").is_some() {
+                if err.to_string().contains("No such container") {
                     println!(" -- Tool container already removed");
                 } else {
                     log::warn!("Failed to wait for tool container: {}", err)
@@ -666,6 +667,7 @@ pub async fn build_image(
     Ok(())
 }
 */
+/*
 fn add_file(tar: &mut tar::Builder<RWBuffer>, path: &Path, data: &[u8]) -> anyhow::Result<()> {
     let mut header = tar::Header::new_ustar();
     header.set_path(path)?;
@@ -674,8 +676,8 @@ fn add_file(tar: &mut tar::Builder<RWBuffer>, path: &Path, data: &[u8]) -> anyho
 
     tar.append(&header, data)?;
     Ok(())
-}
-
+}*/
+/*
 fn add_meta_file(
     tar: &mut tar::Builder<RWBuffer>,
     path: &Path,
@@ -703,7 +705,7 @@ fn add_metadata_inside(
     )?;
     Ok(())
 }
-
+*/
 async fn add_metadata_outside(
     image_path: &Path,
     config: &ContainerConfig,
@@ -739,10 +741,10 @@ async fn read_metadata_outside(image_path: &Path) -> anyhow::Result<ContainerCon
 
     //read metadata from end of the file
     file.seek(SeekFrom::End(-(META_SIZE_BYTES as i64)))?;
-    let mut buf = [0; META_SIZE_BYTES as usize];
+    let mut buf = [0; META_SIZE_BYTES];
     file.read_exact(&mut buf)?;
     //parse from dec string
-    let meta_size = u64::from_str_radix(std::str::from_utf8(&buf)?, 10)?;
+    let meta_size = (std::str::from_utf8(&buf)?).parse::<u64>()?;
     if meta_size + (META_SIZE_BYTES + CRC_BYTES) as u64 > file_size {
         return Err(anyhow!("File is too small"));
     }
@@ -818,6 +820,7 @@ async fn repack(
     Ok(dir_out.join(Path::new(path_out).file_name().unwrap()))
 }
 */
+/*
 fn tar_from_bytes(bytes: &Bytes) -> anyhow::Result<tar::Builder<RWBuffer>> {
     // the tar builder doesn't have any method for constructing an archive from in-memory
     // representation of the whole file, so we need to do that in chunks
@@ -861,9 +864,11 @@ fn tar_from_bytes(bytes: &Bytes) -> anyhow::Result<tar::Builder<RWBuffer>> {
 
     Ok(tar)
 }
+*/
 
+/*
 fn finish_tar(tar: tar::Builder<RWBuffer>) -> anyhow::Result<RWBuffer> {
     let buf = tar.into_inner()?;
     log::debug!("Bytes in tar archive: {}", buf.bytes.len());
     Ok(buf)
-}
+}*/

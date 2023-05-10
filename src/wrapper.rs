@@ -15,12 +15,12 @@ pub struct ProgressContext {
 }
 impl ProgressContext {
     pub fn new() -> Self {
-        return ProgressContext {
+        ProgressContext {
             inner: Arc::new(Mutex::new(ProgressContextInner {
                 bytes_total: 0,
                 bytes_current: 0,
             })),
-        };
+        }
     }
 
     pub fn total_bytes(&self) -> u64 {

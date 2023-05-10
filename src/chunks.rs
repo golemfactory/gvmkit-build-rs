@@ -19,7 +19,7 @@ pub struct FileChunkDesc {
     pub chunks: Vec<FileChunk>,
 }
 
-pub async fn createDescriptor(path: &Path, chunk_size: usize) -> anyhow::Result<FileChunkDesc> {
+pub async fn create_descriptor(path: &Path, chunk_size: usize) -> anyhow::Result<FileChunkDesc> {
     let mut file = File::open(path).await?;
     let metadata = file.metadata().await.unwrap();
     let file_size = metadata.len();
