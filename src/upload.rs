@@ -120,8 +120,8 @@ pub async fn push_descr(file_path: &Path) -> anyhow::Result<()> {
 }
 
 pub async fn push_chunks(file_path: &Path, file_descr: &Path) -> anyhow::Result<()> {
-    let file_descr = tokio::fs::read_to_string(file_descr).await?;
-    let file_descr = serde_json::from_str::<FileChunkDesc>(&file_descr)?;
+    let file_descr = tokio::fs::read(file_descr).await?;
+    let file_descr = FileChunkDesc::deserialize_from_bytes(&file_descr)?;
 
     for (chunk_no, chunk) in file_descr.chunks.iter().enumerate() {
         let repo_url = resolve_repo().await?;
@@ -131,10 +131,9 @@ pub async fn push_chunks(file_path: &Path, file_descr: &Path) -> anyhow::Result<
         let client = reqwest::Client::new();
         let form = multipart::Form::new();
         let form = form.text("chunk-no", chunk_no.to_string());
-        let form = form.text("chunk-sha", chunk.sha256.to_string());
+        let form = form.text("chunk-sha", hex::encode(chunk.sha256).to_string());
         let form = form.text("chunk-pos", chunk.pos.to_string());
         let form = form.text("chunk-len", chunk.len.to_string());
-        let form = form.text("image-sha", file_descr.sha256.to_string());
         let pc = ProgressContext::new();
         let pb = ProgressBar::new(1);
         let sty = ProgressStyle::with_template("[{msg:20}] {wide_bar:.cyan/blue} {pos:9}/{len:9}")
@@ -172,7 +171,10 @@ pub async fn push_chunks(file_path: &Path, file_descr: &Path) -> anyhow::Result<
                     println!("Image uploaded successfully");
                 } else {
                     let status = res.status();
-                    log::error!("Image upload failed with code {}", res.text().await.unwrap_or("".to_string()));
+                    log::error!(
+                        "Image upload failed with code {}",
+                        res.text().await.unwrap_or("".to_string())
+                    );
                     return Err(anyhow::anyhow!(
                         "Image upload failed with code {}",
                         status.as_u16()

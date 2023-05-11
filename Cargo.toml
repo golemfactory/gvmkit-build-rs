@@ -35,5 +35,8 @@ humansize = "2.1.3"
 rand = "0.8.4"
 reqwest = {version="0.11.17", features=["multipart", "stream"]}
 
+[dev-dependencies]
+fastrand = "1.9.0"
+
 [package.metadata.maturin]
 name = "gvmkit_build"
