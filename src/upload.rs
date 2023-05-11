@@ -1,14 +1,11 @@
 use std::env;
 
-use futures::SinkExt;
-
+use anyhow::anyhow;
 use indicatif::{ProgressBar, ProgressStyle};
-use sha3::Digest;
 use std::path::Path;
 
 use reqwest::{multipart, Body};
-
-use tokio::fs::File;
+use tokio::io::AsyncReadExt;
 
 use crate::chunks::FileChunkDesc;
 use crate::wrapper::{stream_file_with_progress, ProgressContext};
@@ -56,24 +53,23 @@ async fn resolve_repo() -> anyhow::Result<String> {
     Ok(base_url)
 }
 
-fn file_to_body(file: File) -> Body {
-    use tokio_util::codec::{BytesCodec, FramedRead};
-    let stream = FramedRead::new(file, BytesCodec::new());
-    let body = Body::wrap_stream(stream);
-    body
-}
-
-fn chunk_to_body(file: File, range: Option<std::ops::Range<usize>>) -> Body {
-    use tokio_util::codec::{BytesCodec, FramedRead};
-    let stream = FramedRead::new(file, BytesCodec::new());
-    let body = Body::wrap_stream(stream);
-    body
-}
-
 pub async fn push_descr(file_path: &Path) -> anyhow::Result<()> {
     let repo_url = resolve_repo().await?;
     println!("Uploading image to: {}", repo_url);
-    let file = tokio::fs::File::open(&file_path).await?;
+    {
+        //check if file readable and close immediately
+        //it's easier to check now than later in stream wrapper
+        let mut file = tokio::fs::File::open(&file_path).await.map_err(|e| {
+            anyhow!(
+                "Descriptor not found or cannot be opened: {} {e:?}",
+                file_path.display()
+            )
+        })?;
+        file.read_i8()
+            .await
+            .map_err(|e| anyhow!("Descriptor not readable: {} {e:?}", file_path.display()))?;
+    }
+
     let descr_endpoint = format!("{repo_url}/v1/image/push/descr").replace("//v1", "/v1");
     println!("Uploading image to: {}", descr_endpoint);
     let client = reqwest::Client::new();
@@ -122,6 +118,19 @@ pub async fn push_descr(file_path: &Path) -> anyhow::Result<()> {
 pub async fn push_chunks(file_path: &Path, file_descr: &Path) -> anyhow::Result<()> {
     let file_descr = tokio::fs::read(file_descr).await?;
     let file_descr = FileChunkDesc::deserialize_from_bytes(&file_descr)?;
+    {
+        //check if file readable and close immediately
+        //it's easier to check now than later in stream wrapper
+        let mut file = tokio::fs::File::open(&file_path).await.map_err(|e| {
+            anyhow!(
+                "File not found or cannot be opened: {} {e:?}",
+                file_path.display()
+            )
+        })?;
+        file.read_i8()
+            .await
+            .map_err(|e| anyhow!("File not readable: {} {e:?}", file_path.display()))?;
+    }
 
     for (chunk_no, chunk) in file_descr.chunks.iter().enumerate() {
         let repo_url = resolve_repo().await?;

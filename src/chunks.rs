@@ -38,7 +38,11 @@ impl FileChunkDesc {
             bytes.extend_from_slice(&chunk.sha256);
         }
         if bytes.len() != expected_length {
-            panic!("Invalid descriptor created expected length {} vs {}", expected_length, bytes.len());
+            panic!(
+                "Invalid descriptor created expected length {} vs {}",
+                expected_length,
+                bytes.len()
+            );
         }
         bytes
     }
@@ -129,7 +133,7 @@ where
         pb.inc(chunk_size as u64);
     }
 
-    Ok( FileChunkDesc {
+    Ok(FileChunkDesc {
         version: VERSION_AND_HEADER,
         size: file_size,
         chunk_size: chunk_size as u64,

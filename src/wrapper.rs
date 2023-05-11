@@ -102,6 +102,10 @@ pub async fn stream_file_with_progress(
     };
 
     pb.set_length(bytes_to_read as u64);
+    {
+        let mut pc = pc.inner.lock().unwrap();
+        pc.bytes_total = bytes_to_read as u64;
+    }
     let res = stream::unfold((file, bytes_to_read), move |(mut file, bytes_to_read)| {
         let pb = pb.clone();
         let pc = pc.clone();
@@ -116,6 +120,10 @@ pub async fn stream_file_with_progress(
             let bytes_read = file.read_exact(&mut buf).await.unwrap();
             let bytes = Bytes::from(buf);
             pb.inc(bytes_read as u64);
+            {
+                let mut pc = pc.inner.lock().unwrap();
+                pc.bytes_current += bytes_read as u64;
+            }
             Some((
                 Ok::<Bytes, anyhow::Error>(bytes),
                 (file, bytes_to_read - bytes_read),
