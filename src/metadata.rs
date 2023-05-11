@@ -5,25 +5,24 @@ use anyhow::anyhow;
 use bollard::service::ContainerConfig;
 use crc::{Crc, CRC_32_ISO_HDLC};
 
-use crate::rwbuf::RWBuffer;
+pub fn compute_crc(bytes: &[u8]) -> u32 {
+    //CRC_32_ISO_HDLC is another name of CRC-32-IEEE which was used in previous version of crc
+    let crc_algo = Crc::<u32>::new(&CRC_32_ISO_HDLC);
+    let mut digest = crc_algo.digest();
+    digest.update(bytes);
+    digest.finalize()
+}
 
 pub async fn add_metadata_outside(
     image_path: &Path,
     config: &ContainerConfig,
 ) -> anyhow::Result<usize> {
-    let mut json_buf = RWBuffer::new();
-    serde_json::to_writer(&mut json_buf, config)?;
+    let json_buf = serde_json::to_vec(config)?;
     let mut file = fs::OpenOptions::new().append(true).open(image_path)?;
-    let meta_size = json_buf.bytes.len();
-    let crc = {
-        //CRC_32_ISO_HDLC is another name of CRC-32-IEEE which was used in previous version of crc
-        let crc_algo = Crc::<u32>::new(&CRC_32_ISO_HDLC);
-        let mut digest = crc_algo.digest();
-        digest.update(&json_buf.bytes);
-        digest.finalize()
-    };
+    let meta_size = json_buf.len();
+    let crc = compute_crc(&json_buf);
     let mut bytes_written = file.write(&crc.to_le_bytes())?;
-    bytes_written += file.write(&json_buf.bytes)?;
+    bytes_written += file.write(&json_buf)?;
     bytes_written += file.write(format!("{meta_size:08}").as_bytes())?;
     Ok(bytes_written)
 }
@@ -56,13 +55,7 @@ pub async fn read_metadata_outside(image_path: &Path) -> anyhow::Result<Containe
     file.read_exact(&mut crc_buf)?;
     let mut json_buf = vec![0; meta_size as usize];
     file.read_exact(&mut json_buf)?;
-    let crc = {
-        //CRC_32_ISO_HDLC is another name of CRC-32-IEEE which was used in previous version of crc
-        let crc_algo = Crc::<u32>::new(&CRC_32_ISO_HDLC);
-        let mut digest = crc_algo.digest();
-        digest.update(&json_buf);
-        digest.finalize()
-    };
+    let crc = compute_crc(&json_buf);
     let crc_read = u32::from_le_bytes(crc_buf);
     if crc != crc_read {
         return Err(anyhow!("CRC mismatch"));
@@ -73,6 +66,9 @@ pub async fn read_metadata_outside(image_path: &Path) -> anyhow::Result<Containe
 
 #[tokio::test]
 async fn test_descriptor_creation() {
+    use std::collections::HashMap;
+    use std::path::PathBuf;
+
     let rng = fastrand::Rng::new();
 
     let test_file_name = &PathBuf::from("test_descriptor_creation.tst");
@@ -81,12 +77,7 @@ async fn test_descriptor_creation() {
     use std::iter::repeat_with;
 
     let bytes: Vec<u8> = repeat_with(|| rng.u8(..)).take(16521).collect();
-    let mut file = fs::OpenOptions::new()
-        .create(true)
-        .write(true)
-        .open(test_file_name)
-        .unwrap();
-    file.write_all(&bytes).unwrap();
+    fs::write(test_file_name, &bytes).unwrap();
 
     println!("Read metadata outside");
     assert_eq!(read_metadata_outside(test_file_name).await.is_err(), true);
@@ -102,9 +93,10 @@ async fn test_descriptor_creation() {
         ("foo2".to_string(), HashMap::new()),
     ]));
 
-    add_metadata_outside(test_file_name, &cfg_write)
+    let bytes_written = add_metadata_outside(test_file_name, &cfg_write)
         .await
         .unwrap();
+    println!("metadata bytes_written: {}", bytes_written);
     let cfg_read = read_metadata_outside(test_file_name).await.unwrap();
     println!("cfg: {:?}", cfg_read);
     assert_eq!(cfg_read, cfg_write);

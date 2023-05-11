@@ -4,7 +4,6 @@ mod chunks;
 mod docker;
 mod image_builder;
 mod metadata;
-mod rwbuf;
 mod upload;
 mod wrapper;
 
