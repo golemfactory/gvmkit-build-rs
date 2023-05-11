@@ -1,8 +1,7 @@
 use std::collections::HashMap;
-use std::io::{Read, Seek, SeekFrom};
+
 use std::{
     fs,
-    io::Write,
     path::{Path, PathBuf},
 };
 
@@ -13,15 +12,14 @@ use bollard::container::{
 
 use crate::wrapper::{stream_with_progress, ProgressContext};
 use anyhow::anyhow;
-use bollard::service::ContainerConfig;
-use crc::{Crc, CRC_32_ISO_HDLC};
+
 use futures_util::TryStreamExt;
 use humansize::DECIMAL;
 use indicatif::{MultiProgress, ProgressBar, ProgressStyle};
 
+use crate::metadata::{add_metadata_outside, read_metadata_outside};
 use std::sync::Arc;
 use tokio::sync::Mutex;
-use crate::metadata::{add_metadata_outside, read_metadata_outside};
 
 pub struct ImageBuilder {
     image_name: String,
@@ -727,7 +725,6 @@ async fn add_metadata_outside(
     Ok(bytes_written)
 }
 */
-
 
 /*
 async fn repack(

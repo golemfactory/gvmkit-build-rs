@@ -1,28 +1,11 @@
-use std::collections::HashMap;
 use std::io::{Read, Seek, SeekFrom};
-use std::{
-    fs,
-    io::Write,
-    path::{Path, PathBuf},
-};
+use std::{fs, io::Write, path::Path};
 
-use bollard::container;
-use bollard::container::{
-    DownloadFromContainerOptions, LogOutput, LogsOptions, UploadToContainerOptions,
-};
-
-use crate::wrapper::{stream_with_progress, ProgressContext};
 use anyhow::anyhow;
 use bollard::service::ContainerConfig;
 use crc::{Crc, CRC_32_ISO_HDLC};
-use futures_util::TryStreamExt;
-use humansize::DECIMAL;
-use indicatif::{MultiProgress, ProgressBar, ProgressStyle};
 
-use std::sync::Arc;
-use tokio::sync::Mutex;
 use crate::rwbuf::RWBuffer;
-
 
 pub async fn add_metadata_outside(
     image_path: &Path,
@@ -44,7 +27,6 @@ pub async fn add_metadata_outside(
     bytes_written += file.write(format!("{meta_size:08}").as_bytes())?;
     Ok(bytes_written)
 }
-
 
 pub async fn read_metadata_outside(image_path: &Path) -> anyhow::Result<ContainerConfig> {
     const META_SIZE_BYTES: usize = 8;
@@ -89,7 +71,6 @@ pub async fn read_metadata_outside(image_path: &Path) -> anyhow::Result<Containe
     Ok(cfg)
 }
 
-
 #[tokio::test]
 async fn test_descriptor_creation() {
     let rng = fastrand::Rng::new();
@@ -98,7 +79,6 @@ async fn test_descriptor_creation() {
     rng.seed(1234);
 
     use std::iter::repeat_with;
-
 
     let bytes: Vec<u8> = repeat_with(|| rng.u8(..)).take(16521).collect();
     let mut file = fs::OpenOptions::new()
@@ -122,14 +102,12 @@ async fn test_descriptor_creation() {
         ("foo2".to_string(), HashMap::new()),
     ]));
 
-    add_metadata_outside(test_file_name, &cfg_write).await.unwrap();
+    add_metadata_outside(test_file_name, &cfg_write)
+        .await
+        .unwrap();
     let cfg_read = read_metadata_outside(test_file_name).await.unwrap();
     println!("cfg: {:?}", cfg_read);
     assert_eq!(cfg_read, cfg_write);
 
     fs::remove_file(test_file_name).unwrap();
-
-
-
 }
-

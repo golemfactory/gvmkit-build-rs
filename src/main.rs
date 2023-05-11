@@ -3,10 +3,10 @@ extern crate core;
 mod chunks;
 mod docker;
 mod image_builder;
-mod upload;
-mod wrapper;
 mod metadata;
 mod rwbuf;
+mod upload;
+mod wrapper;
 
 use crate::image_builder::ImageBuilder;
 
