@@ -6,8 +6,6 @@ use std::{
     path::{Path, PathBuf},
 };
 
-use crate::rwbuf::RWBuffer;
-
 use bollard::container;
 use bollard::container::{
     DownloadFromContainerOptions, LogOutput, LogsOptions, UploadToContainerOptions,
@@ -23,6 +21,7 @@ use indicatif::{MultiProgress, ProgressBar, ProgressStyle};
 
 use std::sync::Arc;
 use tokio::sync::Mutex;
+use crate::metadata::{add_metadata_outside, read_metadata_outside};
 
 pub struct ImageBuilder {
     image_name: String,
@@ -706,6 +705,7 @@ fn add_metadata_inside(
     Ok(())
 }
 */
+/*
 async fn add_metadata_outside(
     image_path: &Path,
     config: &ContainerConfig,
@@ -726,49 +726,8 @@ async fn add_metadata_outside(
     bytes_written += file.write(format!("{meta_size:08}").as_bytes())?;
     Ok(bytes_written)
 }
+*/
 
-async fn read_metadata_outside(image_path: &Path) -> anyhow::Result<ContainerConfig> {
-    const META_SIZE_BYTES: usize = 8;
-    const CRC_BYTES: usize = 4;
-
-    //obtain position of meta data by checking last bytes of file
-    let mut file = fs::OpenOptions::new().read(true).open(image_path)?;
-    file.seek(SeekFrom::End(0))?;
-    let file_size = file.stream_position()?;
-    if file_size < (META_SIZE_BYTES + CRC_BYTES) as u64 {
-        return Err(anyhow!("File is too small"));
-    }
-
-    //read metadata from end of the file
-    file.seek(SeekFrom::End(-(META_SIZE_BYTES as i64)))?;
-    let mut buf = [0; META_SIZE_BYTES];
-    file.read_exact(&mut buf)?;
-    //parse from dec string
-    let meta_size = (std::str::from_utf8(&buf)?).parse::<u64>()?;
-    if meta_size + (META_SIZE_BYTES + CRC_BYTES) as u64 > file_size {
-        return Err(anyhow!("File is too small"));
-    }
-    file.seek(SeekFrom::End(
-        -((META_SIZE_BYTES + CRC_BYTES + meta_size as usize) as i64),
-    ))?;
-    let mut crc_buf = [0; CRC_BYTES];
-    file.read_exact(&mut crc_buf)?;
-    let mut json_buf = vec![0; meta_size as usize];
-    file.read_exact(&mut json_buf)?;
-    let crc = {
-        //CRC_32_ISO_HDLC is another name of CRC-32-IEEE which was used in previous version of crc
-        let crc_algo = Crc::<u32>::new(&CRC_32_ISO_HDLC);
-        let mut digest = crc_algo.digest();
-        digest.update(&json_buf);
-        digest.finalize()
-    };
-    let crc_read = u32::from_le_bytes(crc_buf);
-    if crc != crc_read {
-        return Err(anyhow!("CRC mismatch"));
-    }
-    let cfg = serde_json::from_slice::<ContainerConfig>(&json_buf)?;
-    Ok(cfg)
-}
 
 /*
 async fn repack(
