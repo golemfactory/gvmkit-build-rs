@@ -115,7 +115,6 @@ pub async fn stream_file_with_progress(
             }
             //println!("Bytes to read: {}", bytes_to_read);
             let current_read_size = std::cmp::min(bytes_to_read, 10000);
-            tokio::time::sleep(std::time::Duration::from_millis(100)).await;
             let mut buf = vec![0u8; current_read_size];
             let bytes_read = file.read_exact(&mut buf).await.unwrap();
             let bytes = Bytes::from(buf);

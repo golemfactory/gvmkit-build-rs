@@ -5,6 +5,7 @@ use indicatif::{ProgressBar, ProgressStyle};
 use std::path::Path;
 
 use reqwest::{multipart, Body};
+use sha2::{Sha256, Digest};
 use tokio::io::AsyncReadExt;
 
 use crate::chunks::FileChunkDesc;
@@ -116,8 +117,11 @@ pub async fn push_descr(file_path: &Path) -> anyhow::Result<()> {
 }
 
 pub async fn push_chunks(file_path: &Path, file_descr: &Path) -> anyhow::Result<()> {
-    let file_descr = tokio::fs::read(file_descr).await?;
-    let file_descr = FileChunkDesc::deserialize_from_bytes(&file_descr)?;
+    let file_descr_bytes = tokio::fs::read(file_descr).await?;
+    let mut sha256 = Sha256::new();
+    sha256.update(&file_descr_bytes);
+    let descr_sha256 = hex::encode(sha256.finalize());
+    let file_descr = FileChunkDesc::deserialize_from_bytes(&file_descr_bytes)?;
     {
         //check if file readable and close immediately
         //it's easier to check now than later in stream wrapper
@@ -139,8 +143,10 @@ pub async fn push_chunks(file_path: &Path, file_descr: &Path) -> anyhow::Result<
         println!("Uploading image to: {}", descr_endpoint);
         let client = reqwest::Client::new();
         let form = multipart::Form::new();
+        let form = form.text("descr-sha256", descr_sha256.clone());
         let form = form.text("chunk-no", chunk_no.to_string());
-        let form = form.text("chunk-sha", hex::encode(chunk.sha256).to_string());
+        let form = form.text("chunk-no", chunk_no.to_string());
+        let form = form.text("chunk-sha256", hex::encode(chunk.sha256).to_string());
         let form = form.text("chunk-pos", chunk.pos.to_string());
         let form = form.text("chunk-len", chunk.len.to_string());
         let pc = ProgressContext::new();

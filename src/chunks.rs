@@ -113,7 +113,6 @@ where
 
     let mut file_chunks = Vec::new();
     let mut offset = 0;
-    let mut sha256 = Sha256::new();
     let mut sha256_chunk = Sha256::new();
     let mut buffer = vec![0; chunk_size];
     while offset < file_size {
@@ -121,7 +120,6 @@ where
         buffer.resize(chunk_size, 0);
 
         reader.read_exact(&mut buffer).await.unwrap();
-        sha256.update(&buffer);
         sha256_chunk.update(&buffer);
         let chunk = FileChunk {
             pos: offset,
