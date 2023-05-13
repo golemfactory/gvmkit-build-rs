@@ -5,38 +5,36 @@ use indicatif::{ProgressBar, ProgressStyle};
 use std::path::Path;
 
 use reqwest::{multipart, Body};
-use sha2::{Sha256, Digest};
+use sha2::{Digest, Sha256};
 use tokio::io::AsyncReadExt;
 
 use crate::chunks::FileChunkDesc;
 use crate::wrapper::{stream_file_with_progress, ProgressContext};
-use trust_dns_resolver::config::{ResolverConfig, ResolverOpts};
-use trust_dns_resolver::TokioAsyncResolver;
-
-const PROTOCOL: &str = "http";
-const DOMAIN: &str = "dev.golem.network";
 
 async fn resolve_repo() -> anyhow::Result<String> {
-    if let Ok(repository_url) = env::var("REPOSITORY_URL") {
-        return Ok(repository_url);
-    }
-    let resolver: TokioAsyncResolver =
-        TokioAsyncResolver::tokio(ResolverConfig::google(), ResolverOpts::default())?;
+    Ok(env::var("REPOSITORY_URL").unwrap_or("https://registry.dev.golem.network".to_string()))
+    /*
+    const PROTOCOL: &str = "http";
+    const DOMAIN: &str = "registry.dev.golem.network";
+    use trust_dns_resolver::config::{ResolverConfig, ResolverOpts};
+    use trust_dns_resolver::TokioAsyncResolver;
+            let resolver: TokioAsyncResolver =
+                TokioAsyncResolver::tokio(ResolverConfig::google(), ResolverOpts::default())?;
 
-    let lookup = resolver
-        .srv_lookup(format!("_girepo._tcp.{DOMAIN}"))
-        .await?;
-    let srv = lookup
-        .iter()
-        .next()
-        .ok_or_else(|| anyhow::anyhow!("Repository SRV record not found at {DOMAIN}"))?;
-    let base_url = format!(
-        "{}://{}:{}",
-        PROTOCOL,
-        srv.target().to_string().trim_end_matches('.'),
-        srv.port()
-    );
-
+            let lookup = resolver
+                .srv_lookup(format!("_girepo._tcp.{DOMAIN}"))
+                .await?;
+            let srv = lookup
+                .iter()
+                .next()
+                .ok_or_else(|| anyhow::anyhow!("Repository SRV record not found at {DOMAIN}"))?;
+            let base_url = format!(
+                "{}://{}:{}",
+                PROTOCOL,
+                srv.target().to_string().trim_end_matches('.'),
+                srv.port()
+            );
+        */
     /*
     let client = awc::Client::new();
     let response = client
@@ -51,25 +49,16 @@ async fn resolve_repo() -> anyhow::Result<String> {
             response.status().as_u16()
         ));
     }*/
-    Ok(base_url)
+    // Ok(base_url)
 }
 
 pub async fn push_descr(file_path: &Path) -> anyhow::Result<()> {
     let repo_url = resolve_repo().await?;
     println!("Uploading image to: {}", repo_url);
-    {
-        //check if file readable and close immediately
-        //it's easier to check now than later in stream wrapper
-        let mut file = tokio::fs::File::open(&file_path).await.map_err(|e| {
-            anyhow!(
-                "Descriptor not found or cannot be opened: {} {e:?}",
-                file_path.display()
-            )
-        })?;
-        file.read_i8()
-            .await
-            .map_err(|e| anyhow!("Descriptor not readable: {} {e:?}", file_path.display()))?;
-    }
+    let file_descr_bytes = tokio::fs::read(file_path).await?;
+    let mut sha256 = Sha256::new();
+    sha256.update(&file_descr_bytes);
+    let descr_sha256 = hex::encode(sha256.finalize());
 
     let descr_endpoint = format!("{repo_url}/v1/image/push/descr").replace("//v1", "/v1");
     println!("Uploading image to: {}", descr_endpoint);
@@ -100,7 +89,10 @@ pub async fn push_descr(file_path: &Path) -> anyhow::Result<()> {
     match res {
         Ok(res) => {
             if res.status().is_success() {
-                println!("Image uploaded successfully");
+                let resp = res.text().await?;
+                //let result = serde_json::from_str(&resp)?;
+                println!("Descriptor uploaded successfully {:?}", resp);
+                println!("Download link is: {}/download/{}", repo_url, descr_sha256);
             } else {
                 return Err(anyhow::anyhow!(
                     "Image upload failed with code {}",
