@@ -6,7 +6,7 @@ use tokio::io::AsyncReadExt;
 
 const VERSION_AND_HEADER: u64 = 0x333333333;
 
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug, PartialEq, Eq, Clone)]
 pub struct FileChunk {
     pub pos: u64,
     pub len: u64,

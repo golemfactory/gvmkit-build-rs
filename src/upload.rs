@@ -1,14 +1,15 @@
 use std::env;
 
 use anyhow::anyhow;
-use indicatif::{ProgressBar, ProgressStyle};
-use std::path::Path;
+use futures_util::{stream, StreamExt};
+use indicatif::{MultiProgress, ProgressBar, ProgressStyle};
+use std::path::{Path, PathBuf};
 
 use reqwest::{multipart, Body};
 use sha2::{Digest, Sha256};
 use tokio::io::AsyncReadExt;
 
-use crate::chunks::FileChunkDesc;
+use crate::chunks::{FileChunk, FileChunkDesc};
 use crate::wrapper::{stream_file_with_progress, ProgressContext};
 
 async fn resolve_repo() -> anyhow::Result<String> {
@@ -108,6 +109,83 @@ pub async fn push_descr(file_path: &Path) -> anyhow::Result<()> {
     }
 }
 
+pub async fn upload_single_chunk(
+    file_path: PathBuf,
+    chunk_no: usize,
+    chunk: FileChunk,
+    //file_descr: FileChunkDesc,
+    descr_sha256: String,
+    mc: MultiProgress,
+    sty: ProgressStyle,
+    pb: ProgressBar,
+) -> anyhow::Result<()> {
+    let repo_url = resolve_repo().await?;
+    //println!("Uploading image to: {}", repo_url);
+    let descr_endpoint = format!("{repo_url}/v1/image/push/chunk").replace("//v1", "/v1");
+    //println!("Uploading image to: {}", descr_endpoint);
+    let client = reqwest::Client::new();
+    let form = multipart::Form::new();
+    let form = form.text("descr-sha256", descr_sha256.clone());
+    let form = form.text("chunk-no", chunk_no.to_string());
+    let form = form.text("chunk-no", chunk_no.to_string());
+    let form = form.text("chunk-sha256", hex::encode(chunk.sha256));
+    let form = form.text("chunk-pos", chunk.pos.to_string());
+    let form = form.text("chunk-len", chunk.len.to_string());
+    let pc = ProgressContext::new();
+    let pb_chunk = ProgressBar::new(chunk.len);
+    pb_chunk.set_style(sty.clone());
+    mc.add(pb_chunk.clone());
+    pb_chunk.set_message(format!(
+        "Chunk {}",
+        chunk_no + 1,
+    ));
+
+    let chunk_stream = stream_file_with_progress(
+        &file_path,
+        Some(std::ops::Range {
+            start: chunk.pos as usize,
+            end: (chunk.pos + chunk.len) as usize,
+        }),
+        &pb_chunk,
+        pc,
+    )
+    .await?;
+    let body = Body::wrap_stream(chunk_stream);
+    let some_file = multipart::Part::stream(body)
+        .file_name("descriptor.txt")
+        .mime_str("application/octet-stream")?;
+
+    let form = form.part("file", some_file);
+
+    let res = client
+        .post(descr_endpoint)
+        .multipart(form)
+        .send()
+        .await
+        .map_err(|e| anyhow::anyhow!("Image upload error: {}", e));
+
+    mc.remove(&pb_chunk);
+    match res {
+        Ok(res) => {
+            if res.status().is_success() {
+                pb.inc(1);
+                //println!("Image uploaded successfully");
+                Ok(())
+            } else {
+                let status = res.status();
+
+                Err(anyhow::anyhow!(
+                    "Image upload failed with code {}",
+                    status.as_u16()
+                ))
+            }
+        }
+        Err(e) => {
+            Err(e)
+        }
+    }
+}
+
 pub async fn push_chunks(file_path: &Path, file_descr: &Path) -> anyhow::Result<()> {
     let file_descr_bytes = tokio::fs::read(file_descr).await?;
     let mut sha256 = Sha256::new();
@@ -128,69 +206,41 @@ pub async fn push_chunks(file_path: &Path, file_descr: &Path) -> anyhow::Result<
             .map_err(|e| anyhow!("File not readable: {} {e:?}", file_path.display()))?;
     }
 
-    for (chunk_no, chunk) in file_descr.chunks.iter().enumerate() {
-        let repo_url = resolve_repo().await?;
-        println!("Uploading image to: {}", repo_url);
-        let descr_endpoint = format!("{repo_url}/v1/image/push/chunk").replace("//v1", "/v1");
-        println!("Uploading image to: {}", descr_endpoint);
-        let client = reqwest::Client::new();
-        let form = multipart::Form::new();
-        let form = form.text("descr-sha256", descr_sha256.clone());
-        let form = form.text("chunk-no", chunk_no.to_string());
-        let form = form.text("chunk-no", chunk_no.to_string());
-        let form = form.text("chunk-sha256", hex::encode(chunk.sha256).to_string());
-        let form = form.text("chunk-pos", chunk.pos.to_string());
-        let form = form.text("chunk-len", chunk.len.to_string());
-        let pc = ProgressContext::new();
-        let pb = ProgressBar::new(1);
-        let sty = ProgressStyle::with_template("[{msg:20}] {wide_bar:.cyan/blue} {pos:9}/{len:9}")
-            .unwrap()
-            .progress_chars("##-");
+    let sty = ProgressStyle::with_template("[{msg:20}] {wide_bar:.cyan/blue} {pos:9}/{len:9}")
+        .unwrap()
+        .progress_chars("##-");
+    let mc = MultiProgress::new();
+    let pb = ProgressBar::new(file_descr.chunks.len() as u64);
+    pb.set_style(sty.clone());
+    mc.add(pb.clone());
 
-        pb.set_style(sty.clone());
-        let chunk_stream = stream_file_with_progress(
-            file_path,
-            Some(std::ops::Range {
-                start: chunk.pos as usize,
-                end: (chunk.pos + chunk.len) as usize,
-            }),
-            &pb,
-            pc,
-        )
-        .await?;
-        let body = Body::wrap_stream(chunk_stream);
-        let some_file = multipart::Part::stream(body)
-            .file_name("descriptor.txt")
-            .mime_str("application/octet-stream")?;
+    pb.set_message("Chunked upload");
 
-        let form = form.part("file", some_file);
-
-        let res = client
-            .post(descr_endpoint)
-            .multipart(form)
-            .send()
-            .await
-            .map_err(|e| anyhow::anyhow!("Image upload error: {}", e));
-
-        match res {
-            Ok(res) => {
-                if res.status().is_success() {
-                    println!("Image uploaded successfully");
-                } else {
-                    let status = res.status();
-                    log::error!(
-                        "Image upload failed with code {}",
-                        res.text().await.unwrap_or("".to_string())
-                    );
-                    return Err(anyhow::anyhow!(
-                        "Image upload failed with code {}",
-                        status.as_u16()
-                    ));
+    let mut futures = stream::iter(file_descr.chunks.iter().enumerate().map(
+        |(chunk_no, chunk)| {
+            tokio::spawn(upload_single_chunk(
+                PathBuf::from(file_path),
+                chunk_no,
+                chunk.clone(),
+                descr_sha256.clone(),
+                mc.clone(),
+                sty.clone(),
+                pb.clone(),
+            ))
+        },
+    ))
+    .buffer_unordered(4);
+    while let Some(fut) = futures.next().await {
+        match fut {
+            Ok(join_res) => match join_res {
+                Ok(_res) => {}
+                Err(e) => {
+                    return Err(e);
                 }
-            }
+            },
             Err(e) => {
-                println!("Image upload failed: {}", e);
-                return Err(e);
+                println!("Image upload failed: {:?}", e);
+                return Err(anyhow!("Image upload failed: {:?}", e));
             }
         }
     }

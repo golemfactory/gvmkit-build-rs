@@ -111,10 +111,11 @@ pub async fn stream_file_with_progress(
         let pc = pc.clone();
         async move {
             if bytes_to_read == 0 {
+                pb.finish();
                 return None;
             }
             //println!("Bytes to read: {}", bytes_to_read);
-            let current_read_size = std::cmp::min(bytes_to_read, 10000);
+            let current_read_size = std::cmp::min(bytes_to_read, 100000);
             let mut buf = vec![0u8; current_read_size];
             let bytes_read = file.read_exact(&mut buf).await.unwrap();
             let bytes = Bytes::from(buf);
