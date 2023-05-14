@@ -87,6 +87,7 @@ pub async fn push_descr(file_path: &Path) -> anyhow::Result<()> {
         .await
         .map_err(|e| anyhow::anyhow!("Image upload error: {}", e));
 
+    pb.finish_and_clear();
     match res {
         Ok(res) => {
             if res.status().is_success() {
