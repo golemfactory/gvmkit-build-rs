@@ -147,6 +147,8 @@ async fn main() -> anyhow::Result<()> {
                     }
                 };
             }
+        } else {
+            recrate_descr = true;
         }
         if recrate_descr {
             println!(" * Writing file descriptor to {}", descr_path.display());
