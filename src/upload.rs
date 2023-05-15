@@ -53,6 +53,70 @@ async fn resolve_repo() -> anyhow::Result<String> {
     // Ok(base_url)
 }
 
+#[derive(Debug, serde::Deserialize)]
+pub struct ValidateUploadResponse {
+    pub descriptor: String,
+    pub version: Option<u64>,
+    pub status: Option<String>,
+    pub chunks: Option<Vec<u64>>,
+}
+
+pub async fn full_upload(
+    path: &Path,
+    descr_path: &Path,
+    upload_workers: usize,
+) -> anyhow::Result<()> {
+    let vu = validate_upload(descr_path).await?;
+    if vu.descriptor != "ok" {
+        push_descr(descr_path).await?;
+    }
+    if let Some(status) = vu.status {
+        if status == "full" {
+            println!(" -- image already uploaded");
+            return Ok(());
+        }
+    }
+    let vu = validate_upload(descr_path).await?;
+    if vu.descriptor != "ok" {
+        return Err(anyhow!("Failed to register descriptor in repository"));
+    }
+
+    if let Some(status) = vu.status {
+        if status != "full" {
+            push_chunks(path, descr_path, vu.chunks, upload_workers).await?;
+        }
+    }
+    let vu = validate_upload(descr_path).await?;
+    if vu.status.unwrap_or_default() != "full" {
+        return Err(anyhow!("Failed to validate image upload"));
+    }
+
+    Ok(())
+}
+
+pub async fn validate_upload(file_descr: &Path) -> anyhow::Result<ValidateUploadResponse> {
+    let file_descr_bytes = tokio::fs::read(file_descr).await?;
+    let mut sha256 = Sha256::new();
+    sha256.update(&file_descr_bytes);
+    let descr_sha256 = hex::encode(sha256.finalize());
+
+    let repo_url = resolve_repo().await?;
+
+    let validate_endpoint =
+        format!("{repo_url}/v1/image/descr/{descr_sha256}").replace("//v1", "/v1");
+    //println!("Validating image at: {}", validate_endpoint);
+    let client = reqwest::Client::new();
+    let response = client
+        .get(validate_endpoint)
+        .send()
+        .await
+        .map_err(|e| anyhow::anyhow!("Repository status check failed: {}", e))?;
+
+    let response = response.json::<ValidateUploadResponse>().await?;
+    //println!("Response: {:?}", response);
+    Ok(response)
+}
+
 pub async fn push_descr(file_path: &Path) -> anyhow::Result<()> {
     let repo_url = resolve_repo().await?;
     println!("Uploading image to: {}", repo_url);
@@ -112,7 +176,6 @@ pub async fn push_descr(file_path: &Path) -> anyhow::Result<()> {
 
 pub async fn upload_single_chunk(
     file_path: PathBuf,
-    chunk_no: usize,
     chunk: FileChunk,
     //file_descr: FileChunkDesc,
     descr_sha256: String,
@@ -127,8 +190,7 @@ pub async fn upload_single_chunk(
     let client = reqwest::Client::new();
     let form = multipart::Form::new();
     let form = form.text("descr-sha256", descr_sha256.clone());
-    let form = form.text("chunk-no", chunk_no.to_string());
-    let form = form.text("chunk-no", chunk_no.to_string());
+    let form = form.text("chunk-no", chunk.chunk_no.to_string());
     let form = form.text("chunk-sha256", hex::encode(chunk.sha256));
     let form = form.text("chunk-pos", chunk.pos.to_string());
     let form = form.text("chunk-len", chunk.len.to_string());
@@ -136,10 +198,7 @@ pub async fn upload_single_chunk(
     let pb_chunk = ProgressBar::new(chunk.len);
     pb_chunk.set_style(sty.clone());
     mc.add(pb_chunk.clone());
-    pb_chunk.set_message(format!(
-        "Chunk {}",
-        chunk_no + 1,
-    ));
+    pb_chunk.set_message(format!("Chunk {}", chunk.chunk_no + 1,));
 
     let chunk_stream = stream_file_with_progress(
         &file_path,
@@ -181,13 +240,16 @@ pub async fn upload_single_chunk(
                 ))
             }
         }
-        Err(e) => {
-            Err(e)
-        }
+        Err(e) => Err(e),
     }
 }
 
-pub async fn push_chunks(file_path: &Path, file_descr: &Path) -> anyhow::Result<()> {
+pub async fn push_chunks(
+    file_path: &Path,
+    file_descr: &Path,
+    uploaded_chunks: Option<Vec<u64>>,
+    upload_workers: usize,
+) -> anyhow::Result<()> {
     let file_descr_bytes = tokio::fs::read(file_descr).await?;
     let mut sha256 = Sha256::new();
     sha256.update(&file_descr_bytes);
@@ -206,31 +268,46 @@ pub async fn push_chunks(file_path: &Path, file_descr: &Path) -> anyhow::Result<
             .await
             .map_err(|e| anyhow!("File not readable: {} {e:?}", file_path.display()))?;
     }
+    let chunks_to_upload = if let Some(uploaded_chunks) = uploaded_chunks {
+        let mut chunks = Vec::<FileChunk>::new();
+        for f in file_descr.chunks {
+            let is_uploaded = *uploaded_chunks
+                .get(f.chunk_no as usize)
+                .ok_or(anyhow!("Chunk number {} is out of bounds", f.chunk_no))?;
+            if is_uploaded == 1 {
+                //println!("Chunk {} already uploaded, skipping", f.chunk_no);
+                log::debug!("Chunk {} already uploaded, skipping", f.chunk_no);
+                continue;
+            } else {
+                chunks.push(f);
+            }
+        }
+        chunks
+    } else {
+        file_descr.chunks
+    };
 
     let sty = ProgressStyle::with_template("[{msg:20}] {wide_bar:.cyan/blue} {pos:9}/{len:9}")
         .unwrap()
         .progress_chars("##-");
     let mc = MultiProgress::new();
-    let pb = ProgressBar::new(file_descr.chunks.len() as u64);
+    let pb = ProgressBar::new(chunks_to_upload.len() as u64);
     pb.set_style(sty.clone());
     mc.add(pb.clone());
 
     pb.set_message("Chunked upload");
 
-    let mut futures = stream::iter(file_descr.chunks.iter().enumerate().map(
-        |(chunk_no, chunk)| {
-            tokio::spawn(upload_single_chunk(
-                PathBuf::from(file_path),
-                chunk_no,
-                chunk.clone(),
-                descr_sha256.clone(),
-                mc.clone(),
-                sty.clone(),
-                pb.clone(),
-            ))
-        },
-    ))
-    .buffer_unordered(4);
+    let mut futures = stream::iter(chunks_to_upload.iter().map(|chunk| {
+        tokio::spawn(upload_single_chunk(
+            PathBuf::from(file_path),
+            chunk.clone(),
+            descr_sha256.clone(),
+            mc.clone(),
+            sty.clone(),
+            pb.clone(),
+        ))
+    }))
+    .buffer_unordered(upload_workers);
     while let Some(fut) = futures.next().await {
         match fut {
             Ok(join_res) => match join_res {

@@ -50,9 +50,19 @@ struct CmdArgs {
     /// lz4 and xz do not support this option
     #[arg(long)]
     compression_level: Option<u32>,
+
+    /// Specify chunk size (default 2MB)
+    #[arg(long, default_value = "2000000")]
+    upload_chunk_size: usize,
+    /// Specify number of upload workers (default 4)
+    #[arg(long, default_value = "4")]
+    upload_workers: usize,
 }
 use console::{style, Emoji};
+use tokio::fs;
 
+use crate::chunks::FileChunkDesc;
+use crate::upload::full_upload;
 use tokio::fs::File;
 use tokio::io::AsyncWriteExt;
 
@@ -96,18 +106,59 @@ async fn main() -> anyhow::Result<()> {
     let _deps = 1232;
 
     let path = builder.build().await?;
-    let descr_path = PathBuf::from(path.display().to_string() + "chunks.json");
+    let descr_path = PathBuf::from(path.display().to_string() + ".descr.bin");
     {
-        println!(" * Writing file descriptor to {}", descr_path.display());
-        let mut file = File::create(&descr_path).await?;
-        let descr = chunks::create_descriptor(&path, 2 * 1000 * 1000).await?;
-        file.write_all(&descr.serialize_to_bytes()).await?;
-        println!(" -- file descriptor created successfully");
+        let path_meta = fs::metadata(&path).await?;
+        let mut recrate_descr = false;
+        if descr_path.exists() {
+            if fs::metadata(&descr_path)
+                .await?
+                .modified()
+                .expect("Modified field has to be here")
+                < path_meta.modified().expect("Modified field has to be here")
+            {
+                println!(" -- File descriptor is older than image, recreating");
+                recrate_descr = true;
+            } else {
+                match tokio::fs::read(&descr_path).await {
+                    Ok(file_descr_bytes) => {
+                        match FileChunkDesc::deserialize_from_bytes(&file_descr_bytes) {
+                            Ok(descr) => {
+                                if descr.chunk_size != cmdargs.upload_chunk_size as u64 {
+                                    println!(" -- chunk size changed, recreating file descriptor");
+                                    recrate_descr = true;
+                                } else {
+                                    println!(" -- file descriptor already exists and is newer");
+                                }
+                            }
+                            Err(e) => {
+                                println!(" -- failed to deserialize file descriptor: {}", e);
+                                recrate_descr = true;
+                            }
+                        };
+                    }
+                    Err(e) => {
+                        println!(
+                            " -- failed to read file descriptor: {} {}",
+                            descr_path.display(),
+                            e
+                        );
+                        recrate_descr = true;
+                    }
+                };
+            }
+        }
+        if recrate_descr {
+            println!(" * Writing file descriptor to {}", descr_path.display());
+            let mut file = File::create(&descr_path).await?;
+            let descr = chunks::create_descriptor(&path, cmdargs.upload_chunk_size).await?;
+            file.write_all(&descr.serialize_to_bytes()).await?;
+            println!(" -- file descriptor created successfully");
+        }
     }
 
     if cmdargs.push {
-        upload::push_descr(&descr_path).await?;
-        upload::push_chunks(&path, &descr_path).await?;
+        full_upload(&path, &descr_path, cmdargs.upload_workers).await?;
     }
 
     Ok(())

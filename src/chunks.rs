@@ -8,6 +8,7 @@ const VERSION_AND_HEADER: u64 = 0x333333333;
 
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub struct FileChunk {
+    pub chunk_no: u64,
     pub pos: u64,
     pub len: u64,
     pub sha256: [u8; 32],
@@ -80,11 +81,12 @@ impl FileChunkDesc {
         };
 
         let mut file_pos = 0;
-        for _chunk_no in 0..number_of_chunks {
+        for chunk_no in 0..number_of_chunks {
             let chunk_length = std::cmp::min(chunk_size, size - file_pos);
             let mut sha256 = [0_u8; 32];
             sha256.copy_from_slice(&bytes[offset..offset + 32]);
             descr.chunks.push(FileChunk {
+                chunk_no: chunk_no as u64,
                 pos: file_pos,
                 len: chunk_length,
                 sha256,
@@ -115,6 +117,7 @@ where
     let mut offset = 0;
     let mut sha256_chunk = Sha256::new();
     let mut buffer = vec![0; chunk_size];
+    let mut chunk_no = 0;
     while offset < file_size {
         let chunk_size = std::cmp::min(chunk_size, (file_size - offset) as usize);
         buffer.resize(chunk_size, 0);
@@ -122,10 +125,12 @@ where
         reader.read_exact(&mut buffer).await.unwrap();
         sha256_chunk.update(&buffer);
         let chunk = FileChunk {
+            chunk_no,
             pos: offset,
             len: chunk_size as u64,
             sha256: sha256_chunk.finalize_reset().into(),
         };
+        chunk_no += 1;
         file_chunks.push(chunk);
         offset += chunk_size as u64;
         pb.inc(chunk_size as u64);
