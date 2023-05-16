@@ -57,6 +57,13 @@ struct CmdArgs {
     /// Specify number of upload workers (default 4)
     #[arg(long, default_value = "4")]
     upload_workers: usize,
+
+    #[arg(long)]
+    upload_username: Option<String>,
+    #[arg(long)]
+    upload_repository: Option<String>,
+    #[arg(long)]
+    upload_tag: Option<String>,
 }
 use console::{style, Emoji};
 use tokio::fs;
@@ -160,7 +167,7 @@ async fn main() -> anyhow::Result<()> {
     }
 
     if cmdargs.push {
-        full_upload(&path, &descr_path, cmdargs.upload_workers).await?;
+        full_upload(&path, &descr_path, cmdargs.upload_workers, cmdargs.upload_username, cmdargs.upload_repository, cmdargs.upload_tag).await?;
     }
 
     Ok(())
