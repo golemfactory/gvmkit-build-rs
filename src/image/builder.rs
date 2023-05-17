@@ -17,6 +17,7 @@ use futures_util::TryStreamExt;
 use humansize::DECIMAL;
 use indicatif::{MultiProgress, ProgressBar, ProgressStyle};
 
+use crate::image::name::ImageName;
 use crate::metadata::{add_metadata_outside, read_metadata_outside};
 use std::sync::Arc;
 use tokio::sync::Mutex;
@@ -82,26 +83,12 @@ impl ImageBuilder {
             "* Step1 - create image from given name: {} ...",
             self.image_name
         );
-        let (tag_from_image_name, image_base_name) = if self.image_name.contains(':') {
-            let tag = self
-                .image_name
-                .split(':')
-                .last()
-                .unwrap_or("latest")
-                .to_string();
-            if self.image_name.starts_with(':') {
-                return Err(anyhow::anyhow!("Invalid image name: {}", self.image_name));
-            }
-            let image_base_name = self
-                .image_name
-                .split(':')
-                .next()
-                .expect("It has to work")
-                .to_string();
-            (tag, image_base_name)
-        } else {
-            ("latest".to_string(), self.image_name.clone())
-        };
+
+        let parsed_name = ImageName::from_str_name(&self.image_name)?;
+
+        let image_base_name = parsed_name.to_base_name();
+        let tag_from_image_name = parsed_name.tag;
+
         println!(
             " -- image: {}\n -- tag: {}",
             image_base_name, tag_from_image_name

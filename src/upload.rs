@@ -115,7 +115,6 @@ pub async fn full_upload(
             .send()
             .await
             .map_err(|e| anyhow::anyhow!("Repository status check failed: {}", e))?;
-
     }
 
     Ok(())

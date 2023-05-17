@@ -2,12 +2,12 @@ extern crate core;
 
 mod chunks;
 mod docker;
-mod image_builder;
+mod image;
 mod metadata;
 mod upload;
 mod wrapper;
 
-use crate::image_builder::ImageBuilder;
+use crate::image::ImageBuilder;
 
 use clap::Parser;
 use indicatif::ProgressStyle;
@@ -81,8 +81,6 @@ async fn main() -> anyhow::Result<()> {
     let log_filter = format!("{INTERNAL_LOG_LEVEL},{log_level}");
     env::set_var(env_logger::DEFAULT_FILTER_ENV, log_filter);
     env_logger::init();
-
-
 
     let mut cmdargs = <CmdArgs as Parser>::parse();
 
@@ -170,10 +168,16 @@ async fn main() -> anyhow::Result<()> {
     }
 
     if let Some(push) = cmdargs.push {
-        if let Some(push_image_name) = push.get(0) {
-
-        }
-        full_upload(&path, &descr_path, cmdargs.upload_workers, cmdargs.upload_username, cmdargs.upload_repository, cmdargs.upload_tag).await?;
+        if let Some(push_image_name) = push.get(0) {}
+        full_upload(
+            &path,
+            &descr_path,
+            cmdargs.upload_workers,
+            cmdargs.upload_username,
+            cmdargs.upload_repository,
+            cmdargs.upload_tag,
+        )
+        .await?;
     }
 
     Ok(())
