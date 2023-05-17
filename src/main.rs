@@ -31,9 +31,10 @@ struct CmdArgs {
     /// Force overwriting existing image, even if it matches image
     #[arg(short, long)]
     force: bool,
-    /// Upload image to repository
+    /// Upload image to repository, you can provide optional argument in format <username>/<repository>:<tag>
+    /// Otherwise username, repository and tag is taken from image name
     #[arg(short, long)]
-    push: bool,
+    push: Option<Vec<String>>,
     /// Specify additional image environment variable
     #[arg(long)]
     env: Vec<String>,
@@ -81,7 +82,9 @@ async fn main() -> anyhow::Result<()> {
     env::set_var(env_logger::DEFAULT_FILTER_ENV, log_filter);
     env_logger::init();
 
-    let cmdargs = <CmdArgs as Parser>::parse();
+
+
+    let mut cmdargs = <CmdArgs as Parser>::parse();
 
     if !COMPRESSION_POSSIBLE_VALUES.contains(&cmdargs.compression_method.as_str()) {
         return Err(anyhow::anyhow!(
@@ -166,7 +169,10 @@ async fn main() -> anyhow::Result<()> {
         }
     }
 
-    if cmdargs.push {
+    if let Some(push) = cmdargs.push {
+        if let Some(push_image_name) = push.get(0) {
+
+        }
         full_upload(&path, &descr_path, cmdargs.upload_workers, cmdargs.upload_username, cmdargs.upload_repository, cmdargs.upload_tag).await?;
     }
 
