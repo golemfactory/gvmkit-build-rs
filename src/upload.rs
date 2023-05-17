@@ -10,6 +10,7 @@ use sha2::{Digest, Sha256};
 use tokio::io::AsyncReadExt;
 
 use crate::chunks::{FileChunk, FileChunkDesc};
+use crate::image::ImageName;
 use crate::wrapper::{stream_file_with_progress, ProgressContext};
 
 async fn resolve_repo() -> anyhow::Result<String> {
@@ -61,13 +62,56 @@ pub struct ValidateUploadResponse {
     pub chunks: Option<Vec<u64>>,
 }
 
+pub async fn attach_to_repo(descr_path: &Path, image_name: ImageName) -> anyhow::Result<()> {
+    if image_name.user.is_none() {
+        return Err(anyhow::anyhow!("Image name must contain user"));
+    }
+    let file_descr_bytes = tokio::fs::read(descr_path).await?;
+    let mut sha256 = Sha256::new();
+    sha256.update(&file_descr_bytes);
+    let descr_sha256 = hex::encode(sha256.finalize());
+    let repo_url = resolve_repo().await?;
+
+    let add_tag_endpoint =
+        format!("{repo_url}/v1/image/descr/attach/{descr_sha256}").replace("//v1", "/v1");
+    let form = multipart::Form::new();
+    let form = form.text("tag", image_name.tag.clone());
+    let form = form.text("username", image_name.user.clone().unwrap());
+    let form = form.text("repository", image_name.repository.clone());
+    let form = form.text("login", env::var("REGISTRY_USER").unwrap_or_default());
+    let form = form.text("token", env::var("REGISTRY_TOKEN").unwrap_or_default());
+
+    println!(
+        " * Adding image to repository: {}",
+        image_name.to_normalized_name()
+    );
+    let client = reqwest::Client::new();
+    let response = client
+        .post(add_tag_endpoint)
+        .multipart(form)
+        .send()
+        .await
+        .map_err(|e| anyhow::anyhow!("Repository status check failed: {}", e))?;
+
+    if response.status() != 200 {
+        return match response.text().await {
+            Ok(text) => Err(anyhow::anyhow!(
+                "Failed to attach image to repository: {}",
+                text
+            )),
+            Err(e) => Err(anyhow::anyhow!(
+                "Failed to attach image to repository: {}",
+                e
+            )),
+        };
+    }
+    Ok(())
+}
+
 pub async fn full_upload(
     path: &Path,
     descr_path: &Path,
     upload_workers: usize,
-    username: Option<String>,
-    repository: Option<String>,
-    tag: Option<String>,
 ) -> anyhow::Result<()> {
     let vu = validate_upload(descr_path).await?;
     if vu.descriptor != "ok" {
@@ -92,29 +136,6 @@ pub async fn full_upload(
     let vu = validate_upload(descr_path).await?;
     if vu.status.unwrap_or_default() != "full" {
         return Err(anyhow!("Failed to validate image upload"));
-    }
-
-    if let (Some(username), Some(repository), Some(tag)) = (username, repository, tag) {
-        let file_descr_bytes = tokio::fs::read(descr_path).await?;
-        let mut sha256 = Sha256::new();
-        sha256.update(&file_descr_bytes);
-        let descr_sha256 = hex::encode(sha256.finalize());
-        let repo_url = resolve_repo().await?;
-
-        let add_tag_endpoint =
-            format!("{repo_url}/v1/image/descr/attach/{descr_sha256}").replace("//v1", "/v1");
-        let form = multipart::Form::new();
-        let form = form.text("tag", tag);
-        let form = form.text("username", username);
-        let form = form.text("repository", repository);
-
-        let client = reqwest::Client::new();
-        let response = client
-            .post(add_tag_endpoint)
-            .multipart(form)
-            .send()
-            .await
-            .map_err(|e| anyhow::anyhow!("Repository status check failed: {}", e))?;
     }
 
     Ok(())

@@ -7,10 +7,9 @@ mod metadata;
 mod upload;
 mod wrapper;
 
-use crate::image::ImageBuilder;
+use crate::image::{ImageBuilder, ImageName};
 
 use clap::Parser;
-use indicatif::ProgressStyle;
 use std::path::PathBuf;
 
 use std::env;
@@ -33,8 +32,14 @@ struct CmdArgs {
     force: bool,
     /// Upload image to repository, you can provide optional argument in format <username>/<repository>:<tag>
     /// Otherwise username, repository and tag is taken from image name
-    #[arg(short, long)]
-    push: Option<Vec<String>>,
+    #[arg(long)]
+    push: bool,
+    /// Specify additional image label
+    #[arg(long)]
+    push_to: Option<String>,
+    /// Skip login to repository
+    #[arg(long)]
+    no_login: bool,
     /// Specify additional image environment variable
     #[arg(long)]
     env: Vec<String>,
@@ -58,23 +63,14 @@ struct CmdArgs {
     /// Specify number of upload workers (default 4)
     #[arg(long, default_value = "4")]
     upload_workers: usize,
-
-    #[arg(long)]
-    upload_username: Option<String>,
-    #[arg(long)]
-    upload_repository: Option<String>,
-    #[arg(long)]
-    upload_tag: Option<String>,
 }
-use console::{style, Emoji};
 use tokio::fs;
 
 use crate::chunks::FileChunkDesc;
-use crate::upload::full_upload;
+use crate::upload::{attach_to_repo, full_upload};
 use tokio::fs::File;
 use tokio::io::AsyncWriteExt;
 
-static LOOKING_GLASS: Emoji<'_, '_> = Emoji("🔍  ", "");
 #[tokio::main(flavor = "current_thread")]
 async fn main() -> anyhow::Result<()> {
     let log_level = env::var(env_logger::DEFAULT_FILTER_ENV).unwrap_or(DEFAULT_LOG_LEVEL.into());
@@ -82,7 +78,7 @@ async fn main() -> anyhow::Result<()> {
     env::set_var(env_logger::DEFAULT_FILTER_ENV, log_filter);
     env_logger::init();
 
-    let mut cmdargs = <CmdArgs as Parser>::parse();
+    let cmdargs = <CmdArgs as Parser>::parse();
 
     if !COMPRESSION_POSSIBLE_VALUES.contains(&cmdargs.compression_method.as_str()) {
         return Err(anyhow::anyhow!(
@@ -102,16 +98,35 @@ async fn main() -> anyhow::Result<()> {
         cmdargs.compression_level,
     );
 
-    let _spinner_style = ProgressStyle::with_template("{prefix:.bold.dim} {spinner} {wide_msg}")
-        .unwrap()
-        .tick_chars("⠁⠂⠄⡀⢀⠠⠐⠈ ");
+    //parse image name to check if proper name is provided
+    let _ = ImageName::from_str_name(&cmdargs.image_name)?;
 
-    println!(
-        "{} {}Resolving packages...",
-        style("[1/4]").bold().dim(),
-        LOOKING_GLASS
-    );
-    let _deps = 1232;
+    let push_image_name = if !cmdargs.no_login {
+        if let Some(push_to) = &cmdargs.push_to {
+            //pushing to user/repository:tag given by the user
+            let push_image_name = ImageName::from_str_name(push_to)?;
+            if push_image_name.user.is_none() {
+                return Err(anyhow::anyhow!(
+                    "You have to specify username in push-to argument"
+                ));
+            }
+            Some(push_image_name)
+        } else if cmdargs.push {
+            //pushing to user/repository:tag from image name
+            let push_image_name = ImageName::from_str_name(&cmdargs.image_name)?;
+            if push_image_name.user.is_none() {
+                return Err(anyhow::anyhow!(
+                "You have to specify username. Instead of --push you can use --push-to <username>/<repository>:<tag>"
+            ));
+            }
+            Some(push_image_name)
+        } else {
+            //not pushing at all
+            None
+        }
+    } else {
+        None
+    };
 
     let path = builder.build().await?;
     let descr_path = PathBuf::from(path.display().to_string() + ".descr.bin");
@@ -167,17 +182,11 @@ async fn main() -> anyhow::Result<()> {
         }
     }
 
-    if let Some(push) = cmdargs.push {
-        if let Some(push_image_name) = push.get(0) {}
-        full_upload(
-            &path,
-            &descr_path,
-            cmdargs.upload_workers,
-            cmdargs.upload_username,
-            cmdargs.upload_repository,
-            cmdargs.upload_tag,
-        )
-        .await?;
+    if cmdargs.push || cmdargs.push_to.is_some() {
+        full_upload(&path, &descr_path, cmdargs.upload_workers).await?;
+        if let Some(push_image_name) = push_image_name {
+            attach_to_repo(&descr_path, push_image_name).await?;
+        }
     }
 
     Ok(())

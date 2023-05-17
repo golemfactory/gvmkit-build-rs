@@ -1,5 +1,3 @@
-use clap::builder::Str;
-
 pub struct ImageName {
     pub user: Option<String>,
     pub repository: String,
@@ -40,8 +38,7 @@ impl ImageName {
             }
             if c.is_ascii_alphanumeric() {
                 contains_alpha = true;
-            }
-            else if c == '-' || c == '_' || c == '.' || c == '/' || c == ':' {
+            } else if c == '-' || c == '_' || c == '.' || c == '/' || c == ':' {
                 // ok
             } else {
                 return Err(anyhow::anyhow!("Invalid image name: {}. Contains at least one invalid character: '{}' at pos {}", image_name, c, pos));
@@ -142,10 +139,7 @@ fn test_descriptor_creation() {
         assert_eq!(image_name.repository, "repo");
         assert_eq!(image_name.tag, "version-1.3.5");
         assert_eq!(image_name.user, Some("user".to_string()));
-        assert_eq!(
-            image_name.to_normalized_name(),
-            "user/repo:version-1.3.5"
-        );
+        assert_eq!(image_name.to_normalized_name(), "user/repo:version-1.3.5");
     }
     {
         let image_name = ImageName::from_str_name("repo:version-1.3.5").unwrap();
@@ -153,10 +147,7 @@ fn test_descriptor_creation() {
         assert_eq!(image_name.repository, "repo");
         assert_eq!(image_name.tag, "version-1.3.5");
         assert_eq!(image_name.user, None);
-        assert_eq!(
-            image_name.to_normalized_name(),
-            "repo:version-1.3.5"
-        );
+        assert_eq!(image_name.to_normalized_name(), "repo:version-1.3.5");
     }
 
     {
@@ -172,5 +163,4 @@ fn test_descriptor_creation() {
         assert!(ImageName::from_str_name("use r/rep").is_err());
         assert!(ImageName::from_str_name("usß/rep").is_err());
     }
-
 }
