@@ -156,7 +156,7 @@ impl ImageBuilder {
 
         //pb.finish_and_clear();
 
-        println!("* Step2 - inspect created image: {} ...", self.image_name);
+        println!("* Step2 - inspect docker image: {} ...", self.image_name);
         let image = docker.inspect_image(&self.image_name).await?;
         let image_id = image.id.unwrap();
         let image_id = if image_id.starts_with("sha256:") {

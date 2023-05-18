@@ -67,16 +67,18 @@ struct CmdArgs {
 use tokio::fs;
 
 use crate::chunks::FileChunkDesc;
-use crate::upload::{attach_to_repo, full_upload};
+use crate::upload::{attach_to_repo, full_upload, upload_descriptor};
 use tokio::fs::File;
 use tokio::io::AsyncWriteExt;
 
-#[tokio::main(flavor = "current_thread")]
+#[tokio::main()]
 async fn main() -> anyhow::Result<()> {
+    dotenv::dotenv().ok();
     let log_level = env::var(env_logger::DEFAULT_FILTER_ENV).unwrap_or(DEFAULT_LOG_LEVEL.into());
     let log_filter = format!("{INTERNAL_LOG_LEVEL},{log_level}");
     env::set_var(env_logger::DEFAULT_FILTER_ENV, log_filter);
     env_logger::init();
+
 
     let cmdargs = <CmdArgs as Parser>::parse();
 
@@ -183,9 +185,18 @@ async fn main() -> anyhow::Result<()> {
     }
 
     if cmdargs.push || cmdargs.push_to.is_some() {
-        full_upload(&path, &descr_path, cmdargs.upload_workers).await?;
-        if let Some(push_image_name) = push_image_name {
-            attach_to_repo(&descr_path, push_image_name).await?;
+        let full_upload_needed = upload_descriptor(&descr_path).await?;
+
+        if full_upload_needed {
+            if let Some(push_image_name) = &push_image_name {
+                //check if we can attach to the repo
+                attach_to_repo(&descr_path, push_image_name, true).await?;
+            }
+            full_upload(&path, &descr_path, cmdargs.upload_workers).await?;
+        }
+        if let Some(push_image_name) = &push_image_name {
+            //attach to repo after upload
+            attach_to_repo(&descr_path, push_image_name, false).await?;
         }
     }
 

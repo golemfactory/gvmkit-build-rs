@@ -2,3 +2,4 @@
 Cargo.lock
 *.gvmi
 /target/
+/.env

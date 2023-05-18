@@ -13,8 +13,16 @@ use crate::chunks::{FileChunk, FileChunkDesc};
 use crate::image::ImageName;
 use crate::wrapper::{stream_file_with_progress, ProgressContext};
 
+async fn loads_bytes_and_sha(descr_path: &Path) -> anyhow::Result<(Vec<u8>, String)> {
+    let file_descr_bytes = tokio::fs::read(descr_path).await?;
+    let mut sha256 = Sha256::new();
+    sha256.update(&file_descr_bytes);
+    let descr_sha256 = hex::encode(sha256.finalize());
+    Ok((file_descr_bytes, descr_sha256))
+}
+
 async fn resolve_repo() -> anyhow::Result<String> {
-    Ok(env::var("REPOSITORY_URL").unwrap_or("https://registry.dev.golem.network".to_string()))
+    Ok(env::var("REGISTRY_URL").unwrap_or("https://registry.dev.golem.network".to_string()))
     /*
     const PROTOCOL: &str = "http";
     const DOMAIN: &str = "registry.dev.golem.network";
@@ -62,14 +70,11 @@ pub struct ValidateUploadResponse {
     pub chunks: Option<Vec<u64>>,
 }
 
-pub async fn attach_to_repo(descr_path: &Path, image_name: ImageName) -> anyhow::Result<()> {
+pub async fn attach_to_repo(descr_path: &Path, image_name: &ImageName, check: bool) -> anyhow::Result<()> {
     if image_name.user.is_none() {
         return Err(anyhow::anyhow!("Image name must contain user"));
     }
-    let file_descr_bytes = tokio::fs::read(descr_path).await?;
-    let mut sha256 = Sha256::new();
-    sha256.update(&file_descr_bytes);
-    let descr_sha256 = hex::encode(sha256.finalize());
+    let (_, descr_sha256) = loads_bytes_and_sha(descr_path).await?;
     let repo_url = resolve_repo().await?;
 
     let add_tag_endpoint =
@@ -80,11 +85,23 @@ pub async fn attach_to_repo(descr_path: &Path, image_name: ImageName) -> anyhow:
     let form = form.text("repository", image_name.repository.clone());
     let form = form.text("login", env::var("REGISTRY_USER").unwrap_or_default());
     let form = form.text("token", env::var("REGISTRY_TOKEN").unwrap_or_default());
+    let form = if check {
+        form.text("check", "true")
+    } else {
+        form
+    };
 
-    println!(
-        " * Adding image to repository: {}",
-        image_name.to_normalized_name()
-    );
+    if check {
+        println!(
+            " * Checking if image can be added to repository: {}",
+            image_name.to_normalized_name()
+        );
+    } else {
+        println!(
+            " * Adding image to repository: {}",
+            image_name.to_normalized_name()
+        );
+    }
     let client = reqwest::Client::new();
     let response = client
         .post(add_tag_endpoint)
@@ -96,33 +113,51 @@ pub async fn attach_to_repo(descr_path: &Path, image_name: ImageName) -> anyhow:
     if response.status() != 200 {
         return match response.text().await {
             Ok(text) => Err(anyhow::anyhow!(
-                "Failed to attach image to repository: {}",
+                "Not possible to add to repository: {}",
                 text
             )),
             Err(e) => Err(anyhow::anyhow!(
-                "Failed to attach image to repository: {}",
+                "Not possible to add to repository: {}",
                 e
             )),
         };
+    } else {
+        let text = response.text().await?;
+        if check {
+            println!(" -- checked successfully");
+        } else {
+            println!(" -- success: {}", text);
+        }
     }
     Ok(())
 }
+
+
+//returns if full upload is needed
+pub async fn upload_descriptor(
+    descr_path: &Path,
+) -> anyhow::Result<bool> {
+    let vu = validate_upload(descr_path).await?;
+    if vu.descriptor != "ok" {
+        //upload descriptor if not found
+        push_descr(descr_path).await?;
+    }
+    if let Some(status) = vu.status {
+        if status == "full" {
+            println!(" -- image already uploaded");
+            return Ok(false);
+        }
+    }
+
+    Ok(true)
+}
+
 
 pub async fn full_upload(
     path: &Path,
     descr_path: &Path,
     upload_workers: usize,
 ) -> anyhow::Result<()> {
-    let vu = validate_upload(descr_path).await?;
-    if vu.descriptor != "ok" {
-        push_descr(descr_path).await?;
-    }
-    if let Some(status) = vu.status {
-        if status == "full" {
-            println!(" -- image already uploaded");
-            return Ok(());
-        }
-    }
     let vu = validate_upload(descr_path).await?;
     if vu.descriptor != "ok" {
         return Err(anyhow!("Failed to register descriptor in repository"));
@@ -142,10 +177,7 @@ pub async fn full_upload(
 }
 
 pub async fn validate_upload(file_descr: &Path) -> anyhow::Result<ValidateUploadResponse> {
-    let file_descr_bytes = tokio::fs::read(file_descr).await?;
-    let mut sha256 = Sha256::new();
-    sha256.update(&file_descr_bytes);
-    let descr_sha256 = hex::encode(sha256.finalize());
+    let (_, descr_sha256) = loads_bytes_and_sha(file_descr).await?;
 
     let repo_url = resolve_repo().await?;
 
@@ -166,14 +198,10 @@ pub async fn validate_upload(file_descr: &Path) -> anyhow::Result<ValidateUpload
 
 pub async fn push_descr(file_path: &Path) -> anyhow::Result<()> {
     let repo_url = resolve_repo().await?;
-    println!("Uploading image to: {}", repo_url);
-    let file_descr_bytes = tokio::fs::read(file_path).await?;
-    let mut sha256 = Sha256::new();
-    sha256.update(&file_descr_bytes);
-    let descr_sha256 = hex::encode(sha256.finalize());
+    println!(" * Upload Step1 - pushing image descriptor to: {}", repo_url);
+    let (_, descr_sha256) = loads_bytes_and_sha(file_path).await?;
 
     let descr_endpoint = format!("{repo_url}/v1/image/push/descr").replace("//v1", "/v1");
-    println!("Uploading image to: {}", descr_endpoint);
     let client = reqwest::Client::new();
     let form = multipart::Form::new();
     let pc = ProgressContext::new();
@@ -202,10 +230,8 @@ pub async fn push_descr(file_path: &Path) -> anyhow::Result<()> {
     match res {
         Ok(res) => {
             if res.status().is_success() {
-                let resp = res.text().await?;
-                //let result = serde_json::from_str(&resp)?;
-                println!("Descriptor uploaded successfully {:?}", resp);
-                println!("Download link is: {}/download/{}", repo_url, descr_sha256);
+                println!(" -- descriptor uploaded successfully");
+                println!(" -- download link: {}/download/{}", repo_url, descr_sha256);
             } else {
                 return Err(anyhow::anyhow!(
                     "Image upload failed with code {}",
@@ -297,10 +323,7 @@ pub async fn push_chunks(
     uploaded_chunks: Option<Vec<u64>>,
     upload_workers: usize,
 ) -> anyhow::Result<()> {
-    let file_descr_bytes = tokio::fs::read(file_descr).await?;
-    let mut sha256 = Sha256::new();
-    sha256.update(&file_descr_bytes);
-    let descr_sha256 = hex::encode(sha256.finalize());
+    let (file_descr_bytes, descr_sha256) = loads_bytes_and_sha(file_descr).await?;
     let file_descr = FileChunkDesc::deserialize_from_bytes(&file_descr_bytes)?;
     {
         //check if file readable and close immediately
@@ -322,7 +345,6 @@ pub async fn push_chunks(
                 .get(f.chunk_no as usize)
                 .ok_or(anyhow!("Chunk number {} is out of bounds", f.chunk_no))?;
             if is_uploaded == 1 {
-                //println!("Chunk {} already uploaded, skipping", f.chunk_no);
                 log::debug!("Chunk {} already uploaded, skipping", f.chunk_no);
                 continue;
             } else {
