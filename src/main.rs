@@ -154,6 +154,7 @@ async fn main() -> anyhow::Result<()> {
                                     recrate_descr = true;
                                 } else {
                                     println!(" -- file descriptor already exists and is newer");
+                                    println!(" -- image hash: sha3:{}", hex::encode(descr.sha3));
                                 }
                             }
                             Err(e) => {
@@ -181,6 +182,7 @@ async fn main() -> anyhow::Result<()> {
             let descr = chunks::create_descriptor(&path, cmdargs.upload_chunk_size).await?;
             file.write_all(&descr.serialize_to_bytes()).await?;
             println!(" -- file descriptor created successfully");
+            println!(" -- image hash: sha3:{}", hex::encode(descr.sha3));
         }
     }
 

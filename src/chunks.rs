@@ -1,6 +1,7 @@
 use indicatif::{ProgressBar, ProgressStyle};
 use sha2::{Digest, Sha256};
 use std::path::Path;
+use sha3::Sha3_224;
 use tokio::fs::File;
 use tokio::io::AsyncReadExt;
 
@@ -11,6 +12,7 @@ pub struct FileChunk {
     pub chunk_no: u64,
     pub pos: u64,
     pub len: u64,
+    //use sha-256 (sha256) for chunk collision resistance and performance
     pub sha256: [u8; 32],
 }
 
@@ -19,16 +21,19 @@ pub struct FileChunkDesc {
     pub version: u64,
     pub size: u64,
     pub chunk_size: u64,
+    //golem uses sha-3 (sha224) for checking integrity of downloaded images
+    pub sha3: [u8; 28],
     pub chunks: Vec<FileChunk>,
 }
 
 impl FileChunkDesc {
     pub fn serialize_to_bytes(self: &FileChunkDesc) -> Vec<u8> {
-        let expected_length = 8 + 8 + 8 + self.chunks.len() * 32;
+        let expected_length = 8 + 8 + 8 + 28 + self.chunks.len() * 32;
         let mut bytes = Vec::with_capacity(expected_length);
         bytes.extend_from_slice(&self.version.to_be_bytes());
         bytes.extend_from_slice(&self.size.to_be_bytes());
         bytes.extend_from_slice(&self.chunk_size.to_be_bytes());
+        bytes.extend_from_slice(&self.sha3);
         let number_of_chunks = (self.size + self.chunk_size - 1) / self.chunk_size;
         if number_of_chunks != self.chunks.len() as u64 {
             //sanity check
@@ -64,6 +69,9 @@ impl FileChunkDesc {
         let chunk_size = u64::from_be_bytes(bytes[offset..offset + 8].try_into()?);
         offset += 8;
         let number_of_chunks = ((size + chunk_size - 1) / chunk_size) as usize;
+        let mut sha3 = [0_u8; 28];
+        sha3.copy_from_slice(&bytes[offset..offset + 28]);
+        offset += 28;
 
         if bytes.len() != offset + number_of_chunks * 32 {
             return Err(anyhow::anyhow!(
@@ -77,6 +85,7 @@ impl FileChunkDesc {
             version: version_bytes,
             size,
             chunk_size,
+            sha3,
             chunks: Vec::with_capacity(number_of_chunks),
         };
 
@@ -118,12 +127,14 @@ where
     let mut sha256_chunk = Sha256::new();
     let mut buffer = vec![0; chunk_size];
     let mut chunk_no = 0;
+    let mut sha3 = Sha3_224::new();
     while offset < file_size {
         let chunk_size = std::cmp::min(chunk_size, (file_size - offset) as usize);
         buffer.resize(chunk_size, 0);
 
         reader.read_exact(&mut buffer).await.unwrap();
         sha256_chunk.update(&buffer);
+        sha3.update(&buffer);
         let chunk = FileChunk {
             chunk_no,
             pos: offset,
@@ -141,6 +152,7 @@ where
         size: file_size,
         chunk_size: chunk_size as u64,
         chunks: file_chunks,
+        sha3: sha3.finalize().into(),
     })
 }
 
@@ -204,13 +216,13 @@ async fn test_descriptor_creation() {
     }
 
     let bytes1 = descr1.serialize_to_bytes();
-    assert_eq!(bytes1.len(), 8 + 8 + 8 + 10 * 32);
+    assert_eq!(bytes1.len(), 8 + 8 + 8 + 28 + 10 * 32);
     let bytes2 = descr2.serialize_to_bytes();
-    assert_eq!(bytes2.len(), 8 + 8 + 8 + 11 * 32);
+    assert_eq!(bytes2.len(), 8 + 8 + 8 + 28 + 11 * 32);
     let bytes_empty = descr_empty.serialize_to_bytes();
-    assert_eq!(bytes_empty.len(), 8 + 8 + 8);
+    assert_eq!(bytes_empty.len(), 8 + 8 + 8 + 28);
     let bytes_single = descr_single.serialize_to_bytes();
-    assert_eq!(bytes_single.len(), 8 + 8 + 8 + 1 * 32);
+    assert_eq!(bytes_single.len(), 8 + 8 + 8 + 28 + 1 * 32);
 
     let descr_de1 = FileChunkDesc::deserialize_from_bytes(&bytes1).unwrap();
     assert_eq!(descr_de1, descr1);

@@ -72,86 +72,91 @@ impl ImageBuilder {
             }
         };
 
-        let sty = ProgressStyle::with_template("[{msg:20}] {wide_bar:.cyan/blue} {pos:9}/{len:9}")
-            .unwrap()
-            .progress_chars("##-");
-
-        let mp = MultiProgress::new();
-        let layers = Arc::new(Mutex::new(HashMap::<String, ProgressBar>::new()));
-
-        println!(
-            "* Step1 - create image from given name: {} ...",
-            self.image_name
-        );
-
         let parsed_name = ImageName::from_str_name(&self.image_name)?;
 
         let image_base_name = parsed_name.to_base_name();
         let tag_from_image_name = parsed_name.tag;
 
-        println!(
-            " -- image: {}\n -- tag: {}",
-            image_base_name, tag_from_image_name
-        );
-        match docker
-            .create_image(
-                Some(image::CreateImageOptions {
-                    from_image: self.image_name.as_str(),
-                    tag: &tag_from_image_name,
-                    ..Default::default()
-                }),
-                None,
-                None,
-            )
-            .try_for_each(|ev| async {
-                // let pb = pb.clone();
-                let layers = layers.clone();
-                //log::info!("{:?}", ev);
-                if let Some(id) = ev.clone().id {
-                    if ev.progress_detail.is_none() {
-                        //log::info!(" -- {:?}", ev);
-                        return Ok(());
-                    };
-                    let pb = {
-                        let mut layers = layers.lock().await;
-                        if let Some(pb) = layers.get(&id) {
-                            pb.clone()
-                        } else {
-                            //log::info!(" -- new Layer: {:?}", ev);
-                            let pb = mp.add(ProgressBar::new(1));
-                            pb.set_style(sty.clone());
-                            layers.insert(id.clone(), pb.clone());
-                            pb
-                        }
-                    };
-                    if let Some(status) = ev.status {
-                        pb.set_message(status);
-                    }
+        if  docker.inspect_image(&self.image_name).await.is_err() {
+            let sty = ProgressStyle::with_template("[{msg:20}] {wide_bar:.cyan/blue} {pos:9}/{len:9}")
+                .unwrap()
+                .progress_chars("##-");
 
-                    match ev.progress_detail {
-                        Some(detail) => {
-                            //log::info!(" -- {:?}", detail);
-                            pb.set_length(detail.total.unwrap_or(1) as u64);
-                            pb.set_position(detail.current.unwrap_or(0) as u64);
+            let mp = MultiProgress::new();
+            let layers = Arc::new(Mutex::new(HashMap::<String, ProgressBar>::new()));
+
+            println!(
+                "* Step1 - create image from given name: {} ...",
+                self.image_name
+            );
+
+
+
+
+            println!(
+                " -- image: {}\n -- tag: {}",
+                image_base_name, tag_from_image_name
+            );
+            match docker
+                .create_image(
+                    Some(image::CreateImageOptions {
+                        from_image: self.image_name.as_str(),
+                        tag: &tag_from_image_name,
+                        ..Default::default()
+                    }),
+                    None,
+                    None,
+                )
+                .try_for_each(|ev| async {
+                    // let pb = pb.clone();
+                    let layers = layers.clone();
+                    //log::info!("{:?}", ev);
+                    if let Some(id) = ev.clone().id {
+                        if ev.progress_detail.is_none() {
+                            //log::info!(" -- {:?}", ev);
+                            return Ok(());
+                        };
+                        let pb = {
+                            let mut layers = layers.lock().await;
+                            if let Some(pb) = layers.get(&id) {
+                                pb.clone()
+                            } else {
+                                //log::info!(" -- new Layer: {:?}", ev);
+                                let pb = mp.add(ProgressBar::new(1));
+                                pb.set_style(sty.clone());
+                                layers.insert(id.clone(), pb.clone());
+                                pb
+                            }
+                        };
+                        if let Some(status) = ev.status {
+                            pb.set_message(status);
                         }
-                        None => {
-                            pb.set_length(1);
-                            pb.set_position(0);
+
+                        match ev.progress_detail {
+                            Some(detail) => {
+                                //log::info!(" -- {:?}", detail);
+                                pb.set_length(detail.total.unwrap_or(1) as u64);
+                                pb.set_position(detail.current.unwrap_or(0) as u64);
+                            }
+                            None => {
+                                pb.set_length(1);
+                                pb.set_position(0);
+                            }
                         }
                     }
+                    Ok(())
+                })
+                .await
+            {
+                Ok(_) => {}
+                Err(err) => {
+                    log::error!("Failed to create image: {}", err);
+                    return Err(anyhow::anyhow!("Failed to create image: {}", err));
                 }
-                Ok(())
-            })
-            .await
-        {
-            Ok(_) => {}
-            Err(err) => {
-                log::error!("Failed to create image: {}", err);
-                return Err(anyhow::anyhow!("Failed to create image: {}", err));
             }
-        }
-        for (_, pb) in layers.lock().await.iter() {
-            pb.finish_and_clear();
+            for (_, pb) in layers.lock().await.iter() {
+                pb.finish_and_clear();
+            }
         }
 
         //pb.finish_and_clear();
@@ -332,7 +337,9 @@ impl ImageBuilder {
                 &container_id,
                 Some(DownloadFromContainerOptions { path: "/" }),
             );
-
+            let sty = ProgressStyle::with_template("[{msg:20}] {wide_bar:.cyan/blue} {pos:9}/{len:9}")
+                .unwrap()
+                .progress_chars("##-");
             let pc = ProgressContext::new();
             let pb = ProgressBar::new(image_size as u64);
             pb.set_style(sty.clone());
