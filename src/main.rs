@@ -24,7 +24,7 @@ const COMPRESSION_POSSIBLE_VALUES: &[&str] = &["lzo", "gzip", "lz4", "zstd", "xz
 #[command(author, version, about, long_about = None)]
 struct CmdArgs {
     /// Input Docker image name
-    image_name: String,
+    image_name: Option<String>,
     /// Output image name
     #[arg(help_heading = Some("Image creation"), short, long)]
     output: Option<String>,
@@ -125,8 +125,17 @@ async fn main() -> anyhow::Result<()> {
         };
     }
 
+    let cmd_image_name = match cmdargs.image_name {
+        Some(image_name) => image_name,
+        None => {
+            return Err(anyhow::anyhow!(
+                "You have to specify image name to build"
+            ))
+        }
+    };
+
     //parse image name to check if proper name is provided
-    let _ = ImageName::from_str_name(&cmdargs.image_name)?;
+    let _ = ImageName::from_str_name(&cmd_image_name)?;
     let push_image_name = if !cmdargs.nologin {
         if let Some(push_to) = &cmdargs.push_to {
             //pushing to user/repository:tag given by the user
@@ -139,7 +148,7 @@ async fn main() -> anyhow::Result<()> {
             Some(push_image_name)
         } else if cmdargs.push {
             //pushing to user/repository:tag from image name
-            let push_image_name = ImageName::from_str_name(&cmdargs.image_name)?;
+            let push_image_name = ImageName::from_str_name(&cmd_image_name)?;
             if push_image_name.user.is_none() {
                 return Err(anyhow::anyhow!(
                 "You have to specify username. Instead of --push you can use --push-to <username>/<repository>:<tag>"
@@ -174,7 +183,7 @@ async fn main() -> anyhow::Result<()> {
     };
 
     let builder = ImageBuilder::new(
-        &cmdargs.image_name,
+        &cmd_image_name,
         cmdargs.output,
         cmdargs.force,
         cmdargs.env,
