@@ -87,7 +87,7 @@ impl ImageBuilder {
             let layers = Arc::new(Mutex::new(HashMap::<String, ProgressBar>::new()));
 
             println!(
-                "* Step1 - create image from given name: {} ...",
+                " * Step1 - create image from given name: {} ...",
                 self.image_name
             );
 
@@ -159,7 +159,7 @@ impl ImageBuilder {
 
         //pb.finish_and_clear();
 
-        println!("* Step2 - inspect docker image: {} ...", self.image_name);
+        println!(" * Step2 - inspect docker image: {} ...", self.image_name);
         let image = docker.inspect_image(&self.image_name).await?;
         let image_id = image.id.unwrap();
         let image_id = if image_id.starts_with("sha256:") {
@@ -231,7 +231,7 @@ impl ImageBuilder {
         println!(" -- GVMI image output path: {}", path);
 
         println!(
-            "* Step3 - create container from image: {} ...",
+            " * Step3 - create container from image: {} ...",
             self.image_name
         );
 
@@ -257,7 +257,7 @@ impl ImageBuilder {
 
         let tool_image_name = "scx1332/squashfs";
         println!(
-            "* Step4 - create tool container used for gvmi generation: {} ...",
+            " * Step4 - create tool container used for gvmi generation: {} ...",
             tool_image_name
         );
 
@@ -326,7 +326,7 @@ impl ImageBuilder {
             println!(" -- Tool container id: {}", &tool_container.id[0..12]);
 
             println!(
-                "* Step5 - copy data between containers {} and {} ...",
+                " * Step5 - copy data between containers {} and {} ...",
                 &container_id[0..12],
                 &tool_container.id[0..12]
             );
@@ -372,7 +372,7 @@ impl ImageBuilder {
             .start_container::<String>(&tool_container.id, None)
             .await?;
         println!(
-            "* Step6 - Starting tool container to create image: {}",
+            " * Step6 - Starting tool container to create image: {}",
             &tool_container.id[0..12]
         );
 
@@ -455,7 +455,7 @@ impl ImageBuilder {
 
         pg1.finish_and_clear();
         pg2.finish_and_clear();
-        println!("* Step7 - Waiting for tool container to finish...");
+        println!(" * Step7 - Waiting for tool container to finish...");
         //tokio::time::sleep(Duration::from_secs(1)).await;
         match docker
             .wait_container::<String>(&tool_container.id, None)
@@ -477,7 +477,7 @@ impl ImageBuilder {
             }
         }
 
-        print!("* Step8 - Adding metadata...");
+        print!(" * Step8 - Adding metadata...");
         //        let hash = cont.id.ok_or(anyhow!("Container has no id"))?;
 
         let cfg = cont.config.ok_or(anyhow!("Container has no config"))?;

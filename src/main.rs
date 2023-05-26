@@ -26,56 +26,60 @@ struct CmdArgs {
     /// Input Docker image name
     image_name: String,
     /// Output image name
-    #[arg(short, long)]
+    #[arg(help_heading = Some("Image creation"), short, long)]
     output: Option<String>,
     /// Force overwriting existing image, even if it matches image
-    #[arg(short, long)]
+    #[arg(help_heading = Some("Image creation"), short, long)]
     force: bool,
-    /// Upload image to repository, you can provide optional argument in format <username>/<repository>:<tag>
-    /// Otherwise username, repository and tag is taken from image name
-    #[arg(long)]
+    /// Upload image to repository, repository and tag is taken from image name <username>/<repository>:<tag>
+    #[arg(help_heading = Some("Image upload"), long)]
     push: bool,
-    /// Specify additional image label
-    #[arg(long)]
+    /// Alternative to --push: Upload image to repository, use format <username>/<repository>:<tag>
+    #[arg(help_heading = Some("Image upload"), long)]
     push_to: Option<String>,
-    #[arg(long)]
-    /// Force login to repository using provided user name (useful if you are collaborator on repository)
-    user: Option<String>,
-    /// Use if you want to change personal access token even if it is already saved
-    #[arg(long)]
-    change_pat: bool,
+    /// Force login action and do not build or push image
+    /// Use if you want to change username or personal access token
+    #[arg(help_heading = Some("Portal"), long)]
+    login: bool,
+    ///check if saved login is valid
+    #[arg(help_heading = Some("Portal"), long)]
+    login_check: bool,
+    /// Force logout action (forget saved credentials)
+    #[arg(help_heading = Some("Portal"), long)]
+    logout: bool,
     /// Skip login to repository
-    #[arg(long)]
-    no_login: bool,
+    #[arg(help_heading = Some("Portal"), long)]
+    nologin: bool,
     /// Specify additional image environment variable
-    #[arg(long)]
+    #[arg(help_heading = Some("Legacy/unused image options"), long)]
     env: Vec<String>,
     /// Specify additional image volume
-    #[arg(short, long)]
+    #[arg(help_heading = Some("Legacy/unused image options"), short, long)]
     vol: Vec<String>,
     /// Specify image entrypoint
-    #[arg(short, long)]
+    #[arg(help_heading = Some("Legacy/unused image options"), short, long)]
     entrypoint: Option<String>,
     /// Possible values: lzo, gzip, lz4, zstd, xz
-    #[arg(long, default_value = "lzo")]
+    #[arg(help_heading = Some("Image creation"), long, default_value = "lzo")]
     compression_method: String,
     /// Possible values: lzo [1-9] (default 8), gzip [1-9] (default 9), zstd [1-22] (default 15)
     /// lz4 and xz do not support this option
-    #[arg(long)]
+    #[arg(help_heading = Some("Image creation"), long)]
     compression_level: Option<u32>,
     /// Specify chunk size (default 2MB)
-    #[arg(long, default_value = "2000000")]
+    #[arg(help_heading = Some("Portal"), long, default_value = "2000000")]
     upload_chunk_size: usize,
     /// Specify number of upload workers (default 4)
-    #[arg(long, default_value = "4")]
+    #[arg(help_heading = Some("Portal"), long, default_value = "4")]
     upload_workers: usize,
 }
 use tokio::fs;
 
 use crate::chunks::FileChunkDesc;
-use crate::upload::{attach_to_repo, full_upload, upload_descriptor};
+use crate::upload::{attach_to_repo, full_upload, resolve_repo, upload_descriptor};
 use tokio::fs::File;
 use tokio::io::AsyncWriteExt;
+use crate::login::remove_credentials;
 
 #[tokio::main()]
 async fn main() -> anyhow::Result<()> {
@@ -87,6 +91,11 @@ async fn main() -> anyhow::Result<()> {
 
     let cmdargs = <CmdArgs as Parser>::parse();
 
+    if cmdargs.nologin && cmdargs.push_to.is_some() {
+        return Err(anyhow::anyhow!(
+            "Options --push-to and --nologin are incompatible"
+        ));
+    }
     if !COMPRESSION_POSSIBLE_VALUES.contains(&cmdargs.compression_method.as_str()) {
         return Err(anyhow::anyhow!(
             "Not supported compression method: {}, possible values {}",
@@ -94,9 +103,27 @@ async fn main() -> anyhow::Result<()> {
             COMPRESSION_POSSIBLE_VALUES.join(", ")
         ));
     }
+    if cmdargs.login {
+        println!("Logging in to golem registry: {}", resolve_repo().await?);
+        login::login(None, true).await?;
+        return Ok(());
+    }
+    if cmdargs.logout {
+        remove_credentials().await?;
+        return Ok(());
+    }
+    if cmdargs.login_check {
+        println!("Checking login to golem registry: {}", resolve_repo().await?);
+        return if login::check_if_valid_login().await? {
+            Ok(())
+        } else {
+            Err(anyhow::anyhow!("Login is not valid"))
+        }
+    }
+
     //parse image name to check if proper name is provided
     let _ = ImageName::from_str_name(&cmdargs.image_name)?;
-    let push_image_name = if !cmdargs.no_login {
+    let push_image_name = if !cmdargs.nologin {
         if let Some(push_to) = &cmdargs.push_to {
             //pushing to user/repository:tag given by the user
             let push_image_name = ImageName::from_str_name(push_to)?;
@@ -123,16 +150,16 @@ async fn main() -> anyhow::Result<()> {
         None
     };
 
-    let (user_name, pat) = if !cmdargs.no_login {
+    let (user_name, pat) = if !cmdargs.nologin {
+        println!("Logging in to golem registry: {}", resolve_repo().await?);
+
         if let (Ok(registry_user), Ok(registry_token)) =
             (env::var("REGISTRY_USER"), env::var("REGISTRY_TOKEN"))
         {
             (registry_user, registry_token)
-        } else if let Some(user) = &cmdargs.user {
-            login::login(Some(user), cmdargs.change_pat).await?
         } else if let Some(user_name) = &push_image_name.as_ref().map(|x| &x.user).unwrap_or(&None)
         {
-            login::login(Some(user_name), cmdargs.change_pat).await?
+            login::login(Some(user_name), false).await?
         } else {
             return Err(anyhow::anyhow!(
                     "You have to specify username. Instead of --push you can use --push-to <username>/<repository>:<tag>"
@@ -210,6 +237,7 @@ async fn main() -> anyhow::Result<()> {
     }
 
     if cmdargs.push || cmdargs.push_to.is_some() {
+        println!("Uploading image to golem registry: {}", resolve_repo().await?);
         let full_upload_needed = upload_descriptor(&descr_path).await?;
 
         if full_upload_needed {

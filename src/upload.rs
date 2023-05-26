@@ -22,7 +22,7 @@ async fn loads_bytes_and_sha(descr_path: &Path) -> anyhow::Result<(Vec<u8>, Stri
     Ok((file_descr_bytes, descr_sha256))
 }
 
-async fn resolve_repo() -> anyhow::Result<String> {
+pub async fn resolve_repo() -> anyhow::Result<String> {
     Ok(env::var("REGISTRY_URL").unwrap_or("https://registry.dev.golem.network".to_string()))
     /*
     const PROTOCOL: &str = "http";
@@ -72,7 +72,7 @@ pub struct ValidateUploadResponse {
 }
 
 pub async fn check_login(user_name: &str, pat: &str) -> anyhow::Result<bool> {
-    println!("Checking credentials for {}...", user_name);
+    println!(" * Checking credentials for {}...", user_name);
     let repo_url = resolve_repo().await?;
 
     let check_login_endpoint = format!("{repo_url}/auth/pat/login").replace("//auth", "/auth");
@@ -134,8 +134,6 @@ pub async fn attach_to_repo(
     let form = form.text("username", image_name.user.clone().unwrap());
     let form = form.text("repository", image_name.repository.clone());
     let form = form.text("login", login.to_string());
-    println!("login: {}", login.to_string());
-    println!("token: {}", pat.to_string());
     let form = form.text("token", pat.to_string());
     let form = if check {
         form.text("check", "true")
@@ -244,7 +242,7 @@ pub async fn validate_upload(file_descr: &Path) -> anyhow::Result<ValidateUpload
 pub async fn push_descr(file_path: &Path) -> anyhow::Result<()> {
     let repo_url = resolve_repo().await?;
     println!(
-        " * Upload Step1 - pushing image descriptor to: {}",
+        " * Uploading image descriptor to: {}",
         repo_url
     );
     let (_, descr_sha256) = loads_bytes_and_sha(file_path).await?;
