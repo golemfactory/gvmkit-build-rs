@@ -6,6 +6,7 @@ use indicatif::{MultiProgress, ProgressBar, ProgressStyle};
 use std::path::{Path, PathBuf};
 
 use reqwest::{multipart, Body};
+use serde_json::json;
 use sha2::{Digest, Sha256};
 use tokio::io::AsyncReadExt;
 
@@ -70,7 +71,56 @@ pub struct ValidateUploadResponse {
     pub chunks: Option<Vec<u64>>,
 }
 
-pub async fn attach_to_repo(descr_path: &Path, image_name: &ImageName, check: bool) -> anyhow::Result<()> {
+pub async fn check_login(user_name: &str, pat: &str) -> anyhow::Result<bool> {
+    println!("Checking credentials for {}...", user_name);
+    let repo_url = resolve_repo().await?;
+
+    let check_login_endpoint = format!("{repo_url}/auth/pat/login").replace("//auth", "/auth");
+    //println!("Validating image at: {}", validate_endpoint);
+
+    let post_data = json!(
+        {
+            "username": user_name,
+            "password": pat,
+        }
+    );
+    let client = reqwest::Client::new();
+    let response = client
+        .post(check_login_endpoint)
+        .json(&post_data)
+        .send()
+        .await
+        .map_err(|e| anyhow::anyhow!("Repository status check failed: {}", e))?;
+
+    let response_status = response.status();
+    match response_status {
+        reqwest::StatusCode::OK => {
+            println!(" -- successfully logged in");
+            Ok(true)
+        }
+        reqwest::StatusCode::UNAUTHORIZED => {
+            let text = response.text().await.unwrap_or_default();
+            println!(" -- failed to log in: {}", text);
+            Ok(false)
+        }
+        _ => {
+            let text = response.text().await.unwrap_or_default();
+            Err(anyhow::anyhow!(
+                "Other error when checking login, status: {}, err: {}",
+                response_status,
+                text
+            ))
+        }
+    }
+}
+
+pub async fn attach_to_repo(
+    descr_path: &Path,
+    image_name: &ImageName,
+    login: &str,
+    pat: &str,
+    check: bool,
+) -> anyhow::Result<()> {
     if image_name.user.is_none() {
         return Err(anyhow::anyhow!("Image name must contain user"));
     }
@@ -83,8 +133,10 @@ pub async fn attach_to_repo(descr_path: &Path, image_name: &ImageName, check: bo
     let form = form.text("tag", image_name.tag.clone());
     let form = form.text("username", image_name.user.clone().unwrap());
     let form = form.text("repository", image_name.repository.clone());
-    let form = form.text("login", env::var("REGISTRY_USER").unwrap_or_default());
-    let form = form.text("token", env::var("REGISTRY_TOKEN").unwrap_or_default());
+    let form = form.text("login", login.to_string());
+    println!("login: {}", login.to_string());
+    println!("token: {}", pat.to_string());
+    let form = form.text("token", pat.to_string());
     let form = if check {
         form.text("check", "true")
     } else {
@@ -116,10 +168,7 @@ pub async fn attach_to_repo(descr_path: &Path, image_name: &ImageName, check: bo
                 "Not possible to add to repository: {}",
                 text
             )),
-            Err(e) => Err(anyhow::anyhow!(
-                "Not possible to add to repository: {}",
-                e
-            )),
+            Err(e) => Err(anyhow::anyhow!("Not possible to add to repository: {}", e)),
         };
     } else {
         let text = response.text().await?;
@@ -132,11 +181,8 @@ pub async fn attach_to_repo(descr_path: &Path, image_name: &ImageName, check: bo
     Ok(())
 }
 
-
 //returns if full upload is needed
-pub async fn upload_descriptor(
-    descr_path: &Path,
-) -> anyhow::Result<bool> {
+pub async fn upload_descriptor(descr_path: &Path) -> anyhow::Result<bool> {
     let vu = validate_upload(descr_path).await?;
     if vu.descriptor != "ok" {
         //upload descriptor if not found
@@ -151,7 +197,6 @@ pub async fn upload_descriptor(
 
     Ok(true)
 }
-
 
 pub async fn full_upload(
     path: &Path,
@@ -198,7 +243,10 @@ pub async fn validate_upload(file_descr: &Path) -> anyhow::Result<ValidateUpload
 
 pub async fn push_descr(file_path: &Path) -> anyhow::Result<()> {
     let repo_url = resolve_repo().await?;
-    println!(" * Upload Step1 - pushing image descriptor to: {}", repo_url);
+    println!(
+        " * Upload Step1 - pushing image descriptor to: {}",
+        repo_url
+    );
     let (_, descr_sha256) = loads_bytes_and_sha(file_path).await?;
 
     let descr_endpoint = format!("{repo_url}/v1/image/push/descr").replace("//v1", "/v1");

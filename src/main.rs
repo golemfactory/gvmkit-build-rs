@@ -3,6 +3,7 @@ extern crate core;
 mod chunks;
 mod docker;
 mod image;
+mod login;
 mod metadata;
 mod upload;
 mod wrapper;
@@ -37,6 +38,12 @@ struct CmdArgs {
     /// Specify additional image label
     #[arg(long)]
     push_to: Option<String>,
+    #[arg(long)]
+    /// Force login to repository using provided user name (useful if you are collaborator on repository)
+    user: Option<String>,
+    /// Use if you want to change personal access token even if it is already saved
+    #[arg(long)]
+    change_pat: bool,
     /// Skip login to repository
     #[arg(long)]
     no_login: bool,
@@ -56,7 +63,6 @@ struct CmdArgs {
     /// lz4 and xz do not support this option
     #[arg(long)]
     compression_level: Option<u32>,
-
     /// Specify chunk size (default 2MB)
     #[arg(long, default_value = "2000000")]
     upload_chunk_size: usize,
@@ -74,11 +80,10 @@ use tokio::io::AsyncWriteExt;
 #[tokio::main()]
 async fn main() -> anyhow::Result<()> {
     dotenv::dotenv().ok();
-    let log_level = env::var(env_logger::DEFAULT_FILTER_ENV).unwrap_or(DEFAULT_LOG_LEVEL.into());
+    let log_level = env::var(env_logger::DEFAULT_FILTER_ENV).unwrap_or(DEFAULT_LOG_LEVEL.to_string());
     let log_filter = format!("{INTERNAL_LOG_LEVEL},{log_level}");
     env::set_var(env_logger::DEFAULT_FILTER_ENV, log_filter);
     env_logger::init();
-
 
     let cmdargs = <CmdArgs as Parser>::parse();
 
@@ -89,20 +94,8 @@ async fn main() -> anyhow::Result<()> {
             COMPRESSION_POSSIBLE_VALUES.join(", ")
         ));
     }
-    let builder = ImageBuilder::new(
-        &cmdargs.image_name,
-        cmdargs.output,
-        cmdargs.force,
-        cmdargs.env,
-        cmdargs.vol,
-        cmdargs.entrypoint,
-        cmdargs.compression_method,
-        cmdargs.compression_level,
-    );
-
     //parse image name to check if proper name is provided
     let _ = ImageName::from_str_name(&cmdargs.image_name)?;
-
     let push_image_name = if !cmdargs.no_login {
         if let Some(push_to) = &cmdargs.push_to {
             //pushing to user/repository:tag given by the user
@@ -129,6 +122,36 @@ async fn main() -> anyhow::Result<()> {
     } else {
         None
     };
+
+    let (user_name, pat) = if !cmdargs.no_login {
+        if let (Ok(registry_user), Ok(registry_token)) =
+            (env::var("REGISTRY_USER"), env::var("REGISTRY_TOKEN"))
+        {
+            (registry_user, registry_token)
+        } else if let Some(user) = &cmdargs.user {
+            login::login(Some(user), cmdargs.change_pat).await?
+        } else if let Some(user_name) = &push_image_name.as_ref().map(|x| &x.user).unwrap_or(&None)
+        {
+            login::login(Some(user_name), cmdargs.change_pat).await?
+        } else {
+            return Err(anyhow::anyhow!(
+                    "You have to specify username. Instead of --push you can use --push-to <username>/<repository>:<tag>"
+                ));
+        }
+    } else {
+        (String::new(), String::new())
+    };
+
+    let builder = ImageBuilder::new(
+        &cmdargs.image_name,
+        cmdargs.output,
+        cmdargs.force,
+        cmdargs.env,
+        cmdargs.vol,
+        cmdargs.entrypoint,
+        cmdargs.compression_method,
+        cmdargs.compression_level,
+    );
 
     let path = builder.build().await?;
     let descr_path = PathBuf::from(path.display().to_string() + ".descr.bin");
@@ -192,13 +215,13 @@ async fn main() -> anyhow::Result<()> {
         if full_upload_needed {
             if let Some(push_image_name) = &push_image_name {
                 //check if we can attach to the repo
-                attach_to_repo(&descr_path, push_image_name, true).await?;
+                attach_to_repo(&descr_path, push_image_name, &user_name, &pat, true).await?;
             }
             full_upload(&path, &descr_path, cmdargs.upload_workers).await?;
         }
         if let Some(push_image_name) = &push_image_name {
             //attach to repo after upload
-            attach_to_repo(&descr_path, push_image_name, false).await?;
+            attach_to_repo(&descr_path, push_image_name, &user_name, &pat, false).await?;
         }
     }
 

@@ -77,10 +77,11 @@ impl ImageBuilder {
         let image_base_name = parsed_name.to_base_name();
         let tag_from_image_name = parsed_name.tag;
 
-        if  docker.inspect_image(&self.image_name).await.is_err() {
-            let sty = ProgressStyle::with_template("[{msg:20}] {wide_bar:.cyan/blue} {pos:9}/{len:9}")
-                .unwrap()
-                .progress_chars("##-");
+        if docker.inspect_image(&self.image_name).await.is_err() {
+            let sty =
+                ProgressStyle::with_template("[{msg:20}] {wide_bar:.cyan/blue} {pos:9}/{len:9}")
+                    .unwrap()
+                    .progress_chars("##-");
 
             let mp = MultiProgress::new();
             let layers = Arc::new(Mutex::new(HashMap::<String, ProgressBar>::new()));
@@ -89,9 +90,6 @@ impl ImageBuilder {
                 "* Step1 - create image from given name: {} ...",
                 self.image_name
             );
-
-
-
 
             println!(
                 " -- image: {}\n -- tag: {}",
@@ -337,9 +335,10 @@ impl ImageBuilder {
                 &container_id,
                 Some(DownloadFromContainerOptions { path: "/" }),
             );
-            let sty = ProgressStyle::with_template("[{msg:20}] {wide_bar:.cyan/blue} {pos:9}/{len:9}")
-                .unwrap()
-                .progress_chars("##-");
+            let sty =
+                ProgressStyle::with_template("[{msg:20}] {wide_bar:.cyan/blue} {pos:9}/{len:9}")
+                    .unwrap()
+                    .progress_chars("##-");
             let pc = ProgressContext::new();
             let pb = ProgressBar::new(image_size as u64);
             pb.set_style(sty.clone());
