@@ -47,7 +47,7 @@ struct CmdArgs {
     /// Force logout action (forget saved credentials)
     #[arg(help_heading = Some("Portal"), long)]
     logout: bool,
-    /// Skip login to repository
+    /// Skip login to repository (anonymous upload)
     #[arg(help_heading = Some("Portal"), long)]
     nologin: bool,
     /// Specify additional image environment variable
@@ -76,15 +76,16 @@ struct CmdArgs {
 use tokio::fs;
 
 use crate::chunks::FileChunkDesc;
+use crate::login::remove_credentials;
 use crate::upload::{attach_to_repo, full_upload, resolve_repo, upload_descriptor};
 use tokio::fs::File;
 use tokio::io::AsyncWriteExt;
-use crate::login::remove_credentials;
 
 #[tokio::main()]
 async fn main() -> anyhow::Result<()> {
     dotenv::dotenv().ok();
-    let log_level = env::var(env_logger::DEFAULT_FILTER_ENV).unwrap_or(DEFAULT_LOG_LEVEL.to_string());
+    let log_level =
+        env::var(env_logger::DEFAULT_FILTER_ENV).unwrap_or(DEFAULT_LOG_LEVEL.to_string());
     let log_filter = format!("{INTERNAL_LOG_LEVEL},{log_level}");
     env::set_var(env_logger::DEFAULT_FILTER_ENV, log_filter);
     env_logger::init();
@@ -113,12 +114,15 @@ async fn main() -> anyhow::Result<()> {
         return Ok(());
     }
     if cmdargs.login_check {
-        println!("Checking login to golem registry: {}", resolve_repo().await?);
+        println!(
+            "Checking login to golem registry: {}",
+            resolve_repo().await?
+        );
         return if login::check_if_valid_login().await? {
             Ok(())
         } else {
             Err(anyhow::anyhow!("Login is not valid"))
-        }
+        };
     }
 
     //parse image name to check if proper name is provided
@@ -237,7 +241,10 @@ async fn main() -> anyhow::Result<()> {
     }
 
     if cmdargs.push || cmdargs.push_to.is_some() {
-        println!("Uploading image to golem registry: {}", resolve_repo().await?);
+        println!(
+            "Uploading image to golem registry: {}",
+            resolve_repo().await?
+        );
         let full_upload_needed = upload_descriptor(&descr_path).await?;
 
         if full_upload_needed {

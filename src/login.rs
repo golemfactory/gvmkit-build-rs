@@ -6,7 +6,6 @@ use std::io::{stdout, Write};
 const CREDENTIAL_SERVICE_FIELD: &str = "gvmkit-build-rs";
 const CREDENTIAL_USER_FIELD: &str = "default";
 
-
 pub async fn check_if_valid_login() -> anyhow::Result<bool> {
     if let Some((user_name, pat)) = get_credentials().await? {
         println!(" -- credentials found {}", user_name);
@@ -49,7 +48,6 @@ pub async fn login(user_name: Option<&str>, force: bool) -> anyhow::Result<(Stri
         user_name.trim().to_string()
     };
 
-
     println!(" -- provide access token:");
     let pat = rpassword::read_password().unwrap();
     let pat = pat.trim().to_string();
@@ -81,7 +79,7 @@ pub async fn remove_credentials() -> anyhow::Result<()> {
                 CREDENTIAL_SERVICE_FIELD, CREDENTIAL_USER_FIELD
             );
             Ok(())
-        },
+        }
         Err(e) => match e {
             Error::NoEntry => {
                 println!(
@@ -89,7 +87,7 @@ pub async fn remove_credentials() -> anyhow::Result<()> {
                     CREDENTIAL_SERVICE_FIELD, CREDENTIAL_USER_FIELD
                 );
                 Ok(())
-            },
+            }
             _ => Err(e.into()),
         },
     }
@@ -107,7 +105,7 @@ pub async fn get_credentials() -> anyhow::Result<Option<(String, String)>> {
             } else {
                 Ok(None)
             }
-        },
+        }
         Err(e) => match e {
             Error::NoEntry => Ok(None),
             _ => Err(e.into()),

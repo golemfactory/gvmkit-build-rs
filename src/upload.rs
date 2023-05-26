@@ -241,10 +241,7 @@ pub async fn validate_upload(file_descr: &Path) -> anyhow::Result<ValidateUpload
 
 pub async fn push_descr(file_path: &Path) -> anyhow::Result<()> {
     let repo_url = resolve_repo().await?;
-    println!(
-        " * Uploading image descriptor to: {}",
-        repo_url
-    );
+    println!(" * Uploading image descriptor to: {}", repo_url);
     let (_, descr_sha256) = loads_bytes_and_sha(file_path).await?;
 
     let descr_endpoint = format!("{repo_url}/v1/image/push/descr").replace("//v1", "/v1");

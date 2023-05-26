@@ -155,6 +155,11 @@ impl ImageBuilder {
             for (_, pb) in layers.lock().await.iter() {
                 pb.finish_and_clear();
             }
+        } else {
+            println!(
+                " * Step1 - image for given name {} found, image creation skipped",
+                self.image_name
+            );
         }
 
         //pb.finish_and_clear();
