@@ -303,6 +303,10 @@ impl ImageBuilder {
                 mksquash_command.push("-Xcompression-level".to_string());
                 mksquash_command.push(compression_level.to_string());
             }
+            if self.compression_method == "lz4" {
+                //force Xhc compression for lz4, otherwise this compression type has no benefits over lzo
+                mksquash_command.push("-Xhc".to_string());
+            }
             println!(" -- Image command: {}", mksquash_command.join(" "));
 
             let tool_container = docker

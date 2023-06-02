@@ -50,6 +50,9 @@ struct CmdArgs {
     /// Skip login to repository (anonymous upload)
     #[arg(help_heading = Some("Portal"), long)]
     nologin: bool,
+    /// Specify ready gvmi file to upload to registry, do not use until you now what are you doing
+    #[arg(help_heading = Some("Maintenance options"), short, long)]
+    direct_file_upload: Option<String>,
     /// Specify additional image environment variable
     #[arg(help_heading = Some("Legacy/unused image options"), long)]
     env: Vec<String>,
@@ -125,17 +128,6 @@ async fn main() -> anyhow::Result<()> {
         };
     }
 
-    let cmd_image_name = match cmdargs.image_name {
-        Some(image_name) => image_name,
-        None => {
-            return Err(anyhow::anyhow!(
-                "You have to specify image name to build"
-            ))
-        }
-    };
-
-    //parse image name to check if proper name is provided
-    let _ = ImageName::from_str_name(&cmd_image_name)?;
     let push_image_name = if !cmdargs.nologin {
         if let Some(push_to) = &cmdargs.push_to {
             //pushing to user/repository:tag given by the user
@@ -147,6 +139,10 @@ async fn main() -> anyhow::Result<()> {
             }
             Some(push_image_name)
         } else if cmdargs.push {
+            let cmd_image_name = match cmdargs.image_name.clone() {
+                Some(image_name) => image_name,
+                None => return Err(anyhow::anyhow!("You have to specify image name to build")),
+            };
             //pushing to user/repository:tag from image name
             let push_image_name = ImageName::from_str_name(&cmd_image_name)?;
             if push_image_name.user.is_none() {
@@ -182,18 +178,38 @@ async fn main() -> anyhow::Result<()> {
         (String::new(), String::new())
     };
 
-    let builder = ImageBuilder::new(
-        &cmd_image_name,
-        cmdargs.output,
-        cmdargs.force,
-        cmdargs.env,
-        cmdargs.vol,
-        cmdargs.entrypoint,
-        cmdargs.compression_method,
-        cmdargs.compression_level,
-    );
+    let path = if let Some(direct_file_upload) = cmdargs.direct_file_upload {
+        //skip build and upload file directly
+        let path_buf = PathBuf::from(&direct_file_upload);
+        if path_buf.exists() {
+            path_buf
+        } else {
+            return Err(anyhow::anyhow!(
+                "File {} does not exist",
+                direct_file_upload
+            ));
+        }
+    } else {
+        let cmd_image_name = match cmdargs.image_name {
+            Some(image_name) => image_name,
+            None => return Err(anyhow::anyhow!("You have to specify image name to build")),
+        };
+        //parse image name to check if proper name is provided
+        let _ = ImageName::from_str_name(&cmd_image_name)?;
 
-    let path = builder.build().await?;
+        let builder = ImageBuilder::new(
+            &cmd_image_name,
+            cmdargs.output,
+            cmdargs.force,
+            cmdargs.env,
+            cmdargs.vol,
+            cmdargs.entrypoint,
+            cmdargs.compression_method,
+            cmdargs.compression_level,
+        );
+
+        builder.build().await?
+    };
     let descr_path = PathBuf::from(path.display().to_string() + ".descr.bin");
     {
         let path_meta = fs::metadata(&path).await?;

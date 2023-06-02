@@ -55,6 +55,9 @@ impl FileChunkDesc {
 
     pub fn deserialize_from_bytes(bytes: &[u8]) -> Result<Self, anyhow::Error> {
         let mut offset = 0;
+        if bytes.len() < 8 {
+            return Err(anyhow::anyhow!("Invalid descriptor length {}", bytes.len()));
+        }
         let version_bytes = u64::from_be_bytes(bytes[offset..offset + 8].try_into()?);
         offset += 8;
         if version_bytes != VERSION_AND_HEADER {

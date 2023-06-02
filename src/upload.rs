@@ -181,10 +181,15 @@ pub async fn attach_to_repo(
 
 //returns if full upload is needed
 pub async fn upload_descriptor(descr_path: &Path) -> anyhow::Result<bool> {
+    let repo_url = resolve_repo().await?;
     let vu = validate_upload(descr_path).await?;
     if vu.descriptor != "ok" {
         //upload descriptor if not found
         push_descr(descr_path).await?;
+    } else {
+        let (_, descr_sha256) = loads_bytes_and_sha(descr_path).await?;
+        println!(" -- descriptor already uploaded");
+        println!(" -- download link: {}/download/{}", repo_url, descr_sha256);
     }
     if let Some(status) = vu.status {
         if status == "full" {
