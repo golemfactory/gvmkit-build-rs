@@ -78,6 +78,12 @@ const supportedPlatforms = [
     ARCHITECTURE: "x64",
     RUST_TARGET: "x86_64-apple-darwin",
     PACKING: "tar.gz"
+  },
+  {
+    TYPE: "Darwin",
+    ARCHITECTURE: "arm64",
+    RUST_TARGET: "aarch64-apple-darwin",
+    PACKING: "tar.gz"
   }
 ];
 
@@ -106,7 +112,7 @@ const getBinary = () => {
   const platform = getPlatform();
   // the url for this binary is constructed from values in `package.json`
   // https://github.com/cloudflare/binary-install/releases/download/v1.0.0/binary-install-example-v1.0.0-x86_64-apple-darwin.tar.gz
-  const url = `${repository.url}/releases/download/v0.2.2/gvmkit-build-${platform.RUST_TARGET}.${platform.PACKING}`;
+  const url = `${repository.url}/releases/download/v0.3.1/gvmkit-build-${platform.RUST_TARGET}.${platform.PACKING}`;
   return new MyBinary(url, { name: "gvmkit-build" });
 };
 

@@ -62,7 +62,7 @@ jobs:
         if: "matrix.runs-on != 'windows-latest'"
         run: |
           ARCHIVE_FILE=gvmkit-build-${{ matrix.target }}.tar.gz
-          tar czvf $ARCHIVE_FILE -C target/${{ matrix.target }}/release gvmkit-build
+          tar --format=pax -czvf $ARCHIVE_FILE -C target/${{ matrix.target }}/release gvmkit-build
           shasum -a 256 $ARCHIVE_FILE > $ARCHIVE_FILE.sha256
       - name: "Archive binary"
         shell: bash
