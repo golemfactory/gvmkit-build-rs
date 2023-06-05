@@ -23,7 +23,7 @@ async fn loads_bytes_and_sha(descr_path: &Path) -> anyhow::Result<(Vec<u8>, Stri
 }
 
 pub async fn resolve_repo() -> anyhow::Result<String> {
-    Ok(env::var("REGISTRY_URL").unwrap_or("https://registry.dev.golem.network".to_string()))
+    Ok(env::var("REGISTRY_URL").unwrap_or("https://registry.golem.network".to_string()))
     /*
     const PROTOCOL: &str = "http";
     const DOMAIN: &str = "registry.dev.golem.network";
