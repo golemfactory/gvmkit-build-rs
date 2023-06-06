@@ -59,10 +59,16 @@ jobs:
           name: wheels
           path: dist
       - name: "Archive binary"
-        if: "matrix.runs-on != 'windows-latest'"
+        if: "matrix.runs-on == 'ubuntu-latest'"
         run: |
           ARCHIVE_FILE=gvmkit-build-${{ matrix.target }}.tar.gz
           tar --format=pax -czvf $ARCHIVE_FILE -C target/${{ matrix.target }}/release gvmkit-build
+          shasum -a 256 $ARCHIVE_FILE > $ARCHIVE_FILE.sha256
+      - name: "Archive binary"
+        if: "matrix.runs-on == 'macos-latest'"
+        run: |
+          ARCHIVE_FILE=gvmkit-build-${{ matrix.target }}.tar.gz
+          gtar --format=pax -czvf $ARCHIVE_FILE -C target/${{ matrix.target }}/release gvmkit-build
           shasum -a 256 $ARCHIVE_FILE > $ARCHIVE_FILE.sha256
       - name: "Archive binary"
         shell: bash
