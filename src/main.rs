@@ -159,7 +159,7 @@ async fn main() -> anyhow::Result<()> {
         None
     };
 
-    let (user_name, pat) = if !cmdargs.nologin {
+    let (user_name, pat) = if !cmdargs.nologin && (cmdargs.push || cmdargs.push_to.is_some()) {
         println!("Logging in to golem registry: {}", resolve_repo().await?);
 
         if let (Ok(registry_user), Ok(registry_token)) =
