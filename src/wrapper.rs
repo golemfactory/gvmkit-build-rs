@@ -83,10 +83,9 @@ pub fn stream_with_progress(
 pub async fn stream_file_with_progress(
     file_in: &Path,
     chunk: Option<std::ops::Range<usize>>,
-    pb: indicatif::ProgressBar,
+    pb: Option<indicatif::ProgressBar>,
     pb2: Option<indicatif::ProgressBar>,
-    pc: ProgressContext,
-) -> anyhow::Result<impl Stream<Item = Result<Bytes, anyhow::Error>>>{
+) -> anyhow::Result<impl Stream<Item = Result<Bytes, anyhow::Error>>> {
     let pb = pb.clone();
     let pb2 = pb2.clone();
     let mut file = File::open(file_in).await?;
@@ -102,18 +101,17 @@ pub async fn stream_file_with_progress(
         file_size as usize
     };
 
-    pb.set_length(bytes_to_read as u64);
-    {
-        let mut pc = pc.inner.lock().unwrap();
-        pc.bytes_total = bytes_to_read as u64;
-    }
+    if let Some(pb) = pb.clone() {
+        pb.set_length(bytes_to_read as u64)
+    };
     let res = stream::unfold((file, bytes_to_read), move |(mut file, bytes_to_read)| {
         let pb = pb.clone();
         let pb2 = pb2.clone();
-        let pc = pc.clone();
         async move {
             if bytes_to_read == 0 {
-                pb.finish();
+                if let Some(pb) = pb {
+                    pb.finish()
+                };
                 return None;
             }
             //println!("Bytes to read: {}", bytes_to_read);
@@ -121,11 +119,11 @@ pub async fn stream_file_with_progress(
             let mut buf = vec![0u8; current_read_size];
             let bytes_read = file.read_exact(&mut buf).await.unwrap();
             let bytes = Bytes::from(buf);
-            pb.inc(bytes_read as u64);
-            pb2.map(|pb2|pb2.inc(bytes_read as u64));
-            {
-                let mut pc = pc.inner.lock().unwrap();
-                pc.bytes_current += bytes_read as u64;
+            if let Some(pb) = pb {
+                pb.inc(bytes_read as u64)
+            }
+            if let Some(pb2) = pb2 {
+                pb2.inc(bytes_read as u64)
             }
             Some((
                 Ok::<Bytes, anyhow::Error>(bytes),

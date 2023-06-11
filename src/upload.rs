@@ -12,7 +12,7 @@ use tokio::io::AsyncReadExt;
 
 use crate::chunks::{FileChunk, FileChunkDesc};
 use crate::image::ImageName;
-use crate::wrapper::{stream_file_with_progress, ProgressContext};
+use crate::wrapper::stream_file_with_progress;
 
 async fn loads_bytes_and_sha(descr_path: &Path) -> anyhow::Result<(Vec<u8>, String)> {
     let file_descr_bytes = tokio::fs::read(descr_path).await?;
@@ -252,7 +252,6 @@ pub async fn push_descr(file_path: &Path) -> anyhow::Result<()> {
     let descr_endpoint = format!("{repo_url}/v1/image/push/descr").replace("//v1", "/v1");
     let client = reqwest::Client::new();
     let form = multipart::Form::new();
-    let pc = ProgressContext::new();
     let pb = ProgressBar::new(1);
     let sty = ProgressStyle::with_template("[{msg:20}] {wide_bar:.cyan/blue} {pos:9}/{len:9}")
         .unwrap()
@@ -260,7 +259,7 @@ pub async fn push_descr(file_path: &Path) -> anyhow::Result<()> {
 
     pb.set_style(sty.clone());
 
-    let file_stream = stream_file_with_progress(file_path, None, pb.clone(),None, pc).await?;
+    let file_stream = stream_file_with_progress(file_path, None, Some(pb.clone()), None).await?;
     let body = Body::wrap_stream(file_stream);
     let some_file = multipart::Part::stream(body)
         .file_name("descriptor.txt")
@@ -316,7 +315,6 @@ pub async fn upload_single_chunk(
     let form = form.text("chunk-sha256", hex::encode(chunk.sha256));
     let form = form.text("chunk-pos", chunk.pos.to_string());
     let form = form.text("chunk-len", chunk.len.to_string());
-    let pc = ProgressContext::new();
     let pb_chunk = ProgressBar::new(chunk.len);
     pb_chunk.set_style(sty.clone());
     mc.add(pb_chunk.clone());
@@ -328,9 +326,8 @@ pub async fn upload_single_chunk(
             start: chunk.pos as usize,
             end: (chunk.pos + chunk.len) as usize,
         }),
-        pb_chunk.clone(),
+        Some(pb_chunk.clone()),
         Some(pb2.clone()),
-        pc,
     )
     .await?;
     let body = Body::wrap_stream(chunk_stream);
@@ -394,9 +391,10 @@ pub async fn push_chunks(
         .progress_chars("##-");
     let mc = MultiProgress::new();
     let pb = ProgressBar::new(total_chunk_length as u64);
-    let sty2 = ProgressStyle::with_template("[{msg:20}] {wide_bar:.cyan/blue} {bytes:9}/{total_bytes:9}")
-        .unwrap()
-        .progress_chars("##-");
+    let sty2 =
+        ProgressStyle::with_template("[{msg:20}] {wide_bar:.cyan/blue} {bytes:9}/{total_bytes:9}")
+            .unwrap()
+            .progress_chars("##-");
     let pb2 = ProgressBar::new(file_descr.size);
     pb.set_style(sty.clone());
     pb2.set_style(sty2.clone());
@@ -423,14 +421,13 @@ pub async fn push_chunks(
         file_descr.chunks
     };
 
-
     pb.set_message("Chunked upload");
     pb2.set_message("Total upload");
 
-
-    let sty_single_chunk = ProgressStyle::with_template("[{msg:20}] {wide_bar:.cyan/blue} {bytes:9}/{total_bytes:9}")
-        .unwrap()
-        .progress_chars("##-");
+    let sty_single_chunk =
+        ProgressStyle::with_template("[{msg:20}] {wide_bar:.cyan/blue} {bytes:9}/{total_bytes:9}")
+            .unwrap()
+            .progress_chars("##-");
 
     let mut futures = stream::iter(chunks_to_upload.iter().map(|chunk| {
         tokio::spawn(upload_single_chunk(

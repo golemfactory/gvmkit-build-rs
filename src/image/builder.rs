@@ -360,10 +360,11 @@ impl ImageBuilder {
                 &container_id,
                 Some(DownloadFromContainerOptions { path: "/" }),
             );
-            let sty =
-                ProgressStyle::with_template("[{msg:20}] {wide_bar:.cyan/blue} {bytes:9}/(estimated){total_bytes:9}")
-                    .unwrap()
-                    .progress_chars("##-");
+            let sty = ProgressStyle::with_template(
+                "[{msg:20}] {wide_bar:.cyan/blue} {bytes:9}/(estimated){total_bytes:9}",
+            )
+            .unwrap()
+            .progress_chars("##-");
             let pc = ProgressContext::new();
             let pb = ProgressBar::new(image_size as u64);
             pb.set_style(sty.clone());
@@ -412,9 +413,10 @@ impl ImageBuilder {
         let sty1 = ProgressStyle::with_template("{wide_bar:.cyan/blue}")
             .unwrap()
             .progress_chars("##-");
-        let sty2 = ProgressStyle::with_template("{bytes:9}/(estimated){total_bytes:9} [{wide_msg}]")
-            .unwrap()
-            .progress_chars("##-");
+        let sty2 =
+            ProgressStyle::with_template("{bytes:9}/(estimated){total_bytes:9} [{wide_msg}]")
+                .unwrap()
+                .progress_chars("##-");
 
         pg1.set_style(sty1);
         pg2.set_style(sty2);
