@@ -12,6 +12,7 @@ use tokio::io::AsyncReadExt;
 
 use crate::chunks::{FileChunk, FileChunkDesc};
 use crate::image::ImageName;
+use crate::progress::{create_chunk_pb, ProgressBarType};
 use crate::wrapper::stream_file_with_progress;
 
 async fn loads_bytes_and_sha(descr_path: &Path) -> anyhow::Result<(Vec<u8>, String)> {
@@ -252,12 +253,7 @@ pub async fn push_descr(file_path: &Path) -> anyhow::Result<()> {
     let descr_endpoint = format!("{repo_url}/v1/image/push/descr").replace("//v1", "/v1");
     let client = reqwest::Client::new();
     let form = multipart::Form::new();
-    let pb = ProgressBar::new(1);
-    let sty = ProgressStyle::with_template("[{msg:20}] {wide_bar:.cyan/blue} {bytes:9}/{total_bytes:9}")
-        .unwrap()
-        .progress_chars("##-");
-
-    pb.set_style(sty.clone());
+    let pb = create_chunk_pb(1, ProgressBarType::DescriptorUpload);
 
     let file_stream = stream_file_with_progress(file_path, None, Some(pb.clone()), None).await?;
     let body = Body::wrap_stream(file_stream);
@@ -300,7 +296,6 @@ pub async fn upload_single_chunk(
     //file_descr: FileChunkDesc,
     descr_sha256: String,
     mc: MultiProgress,
-    sty: ProgressStyle,
     pb: ProgressBar,
     pb2: ProgressBar,
 ) -> anyhow::Result<()> {
@@ -315,9 +310,10 @@ pub async fn upload_single_chunk(
     let form = form.text("chunk-sha256", hex::encode(chunk.sha256));
     let form = form.text("chunk-pos", chunk.pos.to_string());
     let form = form.text("chunk-len", chunk.len.to_string());
-    let pb_chunk = ProgressBar::new(chunk.len);
-    pb_chunk.set_style(sty.clone());
-    mc.add(pb_chunk.clone());
+    let pb_chunk = create_chunk_pb(chunk.len, ProgressBarType::SingleChunk);
+    if !pb_chunk.is_hidden() {
+        mc.add(pb_chunk.clone());
+    }
     pb_chunk.set_message(format!("Chunk {}", chunk.chunk_no + 1,));
 
     let chunk_stream = stream_file_with_progress(
@@ -386,20 +382,15 @@ pub async fn push_chunks(
     }
     let total_chunk_length = file_descr.chunks.len();
 
-    let sty = ProgressStyle::with_template("[{msg:20}] {wide_bar:.cyan/blue} {pos:9}/{len:9}")
-        .unwrap()
-        .progress_chars("##-");
     let mc = MultiProgress::new();
-    let pb = ProgressBar::new(total_chunk_length as u64);
-    let sty2 =
-        ProgressStyle::with_template("[{msg:20}] {wide_bar:.cyan/blue} {bytes:9}/{total_bytes:9}")
-            .unwrap()
-            .progress_chars("##-");
-    let pb2 = ProgressBar::new(file_descr.size);
-    pb.set_style(sty.clone());
-    pb2.set_style(sty2.clone());
-    mc.add(pb2.clone());
-    mc.add(pb.clone());
+    let pb_chunks = create_chunk_pb(total_chunk_length as u64, ProgressBarType::UploadChunks);
+    let pb_total = create_chunk_pb(file_descr.size, ProgressBarType::UploadTotal);
+    if !pb_total.is_hidden() {
+        mc.add(pb_total.clone());
+    }
+    if !pb_chunks.is_hidden() {
+        mc.add(pb_chunks.clone());
+    }
 
     let chunks_to_upload = if let Some(uploaded_chunks) = uploaded_chunks {
         let mut chunks = Vec::<FileChunk>::new();
@@ -408,8 +399,8 @@ pub async fn push_chunks(
                 .get(f.chunk_no as usize)
                 .ok_or(anyhow!("Chunk number {} is out of bounds", f.chunk_no))?;
             if is_uploaded == 1 {
-                pb.inc(1);
-                pb2.inc(f.len);
+                pb_chunks.inc(1);
+                pb_total.inc(f.len);
                 log::debug!("Chunk {} already uploaded, skipping", f.chunk_no);
                 continue;
             } else {
@@ -421,13 +412,8 @@ pub async fn push_chunks(
         file_descr.chunks
     };
 
-    pb.set_message("Chunked upload");
-    pb2.set_message("Total upload");
-
-    let sty_single_chunk =
-        ProgressStyle::with_template("[{msg:20}] {wide_bar:.cyan/blue} {bytes:9}/{total_bytes:9}")
-            .unwrap()
-            .progress_chars("##-");
+    pb_chunks.set_message("Chunked upload");
+    pb_total.set_message("Total upload");
 
     let mut futures = stream::iter(chunks_to_upload.iter().map(|chunk| {
         tokio::spawn(upload_single_chunk(
@@ -435,9 +421,8 @@ pub async fn push_chunks(
             chunk.clone(),
             descr_sha256.clone(),
             mc.clone(),
-            sty_single_chunk.clone(),
-            pb.clone(),
-            pb2.clone(),
+            pb_chunks.clone(),
+            pb_total.clone(),
         ))
     }))
     .buffer_unordered(upload_workers);

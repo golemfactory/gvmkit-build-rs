@@ -7,6 +7,7 @@ mod login;
 mod metadata;
 mod upload;
 mod wrapper;
+mod progress;
 
 use crate::image::{ImageBuilder, ImageName};
 
@@ -75,6 +76,9 @@ struct CmdArgs {
     /// Specify number of upload workers (default 4)
     #[arg(help_heading = Some("Portal"), long, default_value = "4")]
     upload_workers: usize,
+    /// Hide progress bars during operation
+    #[arg(help_heading = Some("Extra options"), long)]
+    hide_progress: bool,
 }
 use tokio::fs;
 
@@ -83,6 +87,7 @@ use crate::login::remove_credentials;
 use crate::upload::{attach_to_repo, full_upload, resolve_repo, upload_descriptor};
 use tokio::fs::File;
 use tokio::io::AsyncWriteExt;
+use crate::progress::set_progress_bar_settings;
 
 #[tokio::main()]
 async fn main() -> anyhow::Result<()> {
@@ -94,6 +99,10 @@ async fn main() -> anyhow::Result<()> {
     env_logger::init();
 
     let cmdargs = <CmdArgs as Parser>::parse();
+
+    set_progress_bar_settings(progress::ProgressBarSettings {
+        hidden: cmdargs.hide_progress,
+    });
 
     if cmdargs.nologin && cmdargs.push_to.is_some() {
         return Err(anyhow::anyhow!(
