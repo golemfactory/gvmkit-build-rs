@@ -253,7 +253,7 @@ pub async fn push_descr(file_path: &Path) -> anyhow::Result<()> {
     let client = reqwest::Client::new();
     let form = multipart::Form::new();
     let pb = ProgressBar::new(1);
-    let sty = ProgressStyle::with_template("[{msg:20}] {wide_bar:.cyan/blue} {pos:9}/{len:9}")
+    let sty = ProgressStyle::with_template("[{msg:20}] {wide_bar:.cyan/blue} {bytes:9}/{total_bytes:9}")
         .unwrap()
         .progress_chars("##-");
 
