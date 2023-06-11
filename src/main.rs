@@ -127,7 +127,6 @@ async fn main() -> anyhow::Result<()> {
             Err(anyhow::anyhow!("Login is not valid"))
         };
     }
-
     let push_image_name = if !cmdargs.nologin {
         if let Some(push_to) = &cmdargs.push_to {
             //pushing to user/repository:tag given by the user
@@ -159,7 +158,7 @@ async fn main() -> anyhow::Result<()> {
         None
     };
 
-    let (user_name, pat) = if !cmdargs.nologin {
+    let (user_name, pat) = if !cmdargs.nologin && (cmdargs.push_to.is_some() || cmdargs.push) {
         println!("Logging in to golem registry: {}", resolve_repo().await?);
 
         if let (Ok(registry_user), Ok(registry_token)) =

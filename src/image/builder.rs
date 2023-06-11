@@ -72,6 +72,22 @@ impl ImageBuilder {
             }
         };
 
+        match docker.version().await {
+            Ok(version) => {
+                println!(
+                    " -- connected to docker engine platform: {} version: {}",
+                    version.platform.map(|pv| pv.name).unwrap_or("".to_string()),
+                    version.version.unwrap_or_default()
+                );
+            }
+            Err(err) => {
+                log::error!("Failed to get docker service version: {}", err);
+                return Err(anyhow::anyhow!(
+                    "Cannot connect to docker engine, please check if docker is running"
+                ));
+            }
+        };
+
         let parsed_name = ImageName::from_str_name(&self.image_name)?;
 
         let image_base_name = parsed_name.to_base_name();
