@@ -83,11 +83,12 @@ pub fn stream_with_progress(
 pub async fn stream_file_with_progress(
     file_in: &Path,
     chunk: Option<std::ops::Range<usize>>,
-    pb: &indicatif::ProgressBar,
+    pb: indicatif::ProgressBar,
+    pb2: Option<indicatif::ProgressBar>,
     pc: ProgressContext,
-) -> anyhow::Result<impl Stream<Item = Result<Bytes, anyhow::Error>>> {
+) -> anyhow::Result<impl Stream<Item = Result<Bytes, anyhow::Error>>>{
     let pb = pb.clone();
-
+    let pb2 = pb2.clone();
     let mut file = File::open(file_in).await?;
     let file_size = file.metadata().await?.len();
     let bytes_to_read = if let Some(range) = chunk {
@@ -108,6 +109,7 @@ pub async fn stream_file_with_progress(
     }
     let res = stream::unfold((file, bytes_to_read), move |(mut file, bytes_to_read)| {
         let pb = pb.clone();
+        let pb2 = pb2.clone();
         let pc = pc.clone();
         async move {
             if bytes_to_read == 0 {
@@ -120,6 +122,7 @@ pub async fn stream_file_with_progress(
             let bytes_read = file.read_exact(&mut buf).await.unwrap();
             let bytes = Bytes::from(buf);
             pb.inc(bytes_read as u64);
+            pb2.map(|pb2|pb2.inc(bytes_read as u64));
             {
                 let mut pc = pc.inner.lock().unwrap();
                 pc.bytes_current += bytes_read as u64;
