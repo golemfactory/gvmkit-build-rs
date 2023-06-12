@@ -119,9 +119,10 @@ where
     AsyncReader: tokio::io::AsyncRead + Unpin,
 {
     let pb = ProgressBar::new(file_size);
-    let sty1 = ProgressStyle::with_template("[{msg}] {wide_bar:.cyan/blue}")
-        .unwrap()
-        .progress_chars("##-");
+    let sty1 =
+        ProgressStyle::with_template("[{msg}] {wide_bar:.cyan/blue} {bytes:9}/{total_bytes:9}")
+            .unwrap()
+            .progress_chars("##-");
     pb.set_style(sty1);
     pb.set_message("Reading file");
 
