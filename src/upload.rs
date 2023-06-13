@@ -220,6 +220,8 @@ pub async fn full_upload(
     let vu = validate_upload(descr_path).await?;
     if vu.status.unwrap_or_default() != "full" {
         return Err(anyhow!("Failed to validate image upload"));
+    } else {
+        println!(" -- image validated successfully");
     }
 
     Ok(())
@@ -241,7 +243,6 @@ pub async fn validate_upload(file_descr: &Path) -> anyhow::Result<ValidateUpload
         .map_err(|e| anyhow::anyhow!("Repository status check failed: {}", e))?;
 
     let response = response.json::<ValidateUploadResponse>().await?;
-    //println!("Response: {:?}", response);
     Ok(response)
 }
 
@@ -444,11 +445,15 @@ pub async fn push_chunks(
                 }
             },
             Err(e) => {
-                println!("Image upload failed: {:?}", e);
+                log::error!("Image upload failed: {:?}", e);
                 return Err(anyhow!("Image upload failed: {:?}", e));
             }
         }
     }
+    mc.remove(&pb_chunks);
+    mc.remove(&pb_details);
+    mc.remove(&pb_total);
+    println!(" -- chunked upload finished successfully");
     Ok(())
 }
 /*

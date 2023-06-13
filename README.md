@@ -12,3 +12,10 @@ Remember to set proper permissions to the file (chmod 600 .env) if using on shar
 REGISTRY_USER=<username-in-registry-portal>
 REGISTRY_TOKEN=<access-token-generated-in-registry-portal>
 ```
+
+# debug command
+
+To build image to registry you can use following command:
+```
+cargo run --release -- python --push --nologin
+```
