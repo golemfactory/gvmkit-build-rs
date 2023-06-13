@@ -1,6 +1,6 @@
 [package]
 name = "gvmkit-build"
-version = "0.3.3"
+version = "0.3.4"
 authors = ["Golem Factory <contact@golem.network>"]
 edition = "2021"
 license = "GPL-3.0"
@@ -44,3 +44,10 @@ fastrand = "1.9.0"
 
 [package.metadata.maturin]
 name = "gvmkit_build"
+
+[profile.release-lto]
+inherits = "release"
+codegen-units = 1
+lto = "fat"
+opt-level = 3
+panic = "abort"

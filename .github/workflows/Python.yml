@@ -40,14 +40,14 @@ jobs:
         uses: PyO3/maturin-action@v1
         with:
           target: ${{ matrix.target }}
-          args: --release --out dist -m Cargo.toml
+          args: --profile release-lto --out dist -m Cargo.toml
           manylinux: auto
       - name: Build wheels (musl)
         if: contains(matrix.target, 'musl')
         uses: PyO3/maturin-action@v1
         with:
           target: ${{ matrix.target }}
-          args: --release --out dist -m Cargo.toml
+          args: --profile release-lto --out dist -m Cargo.toml
           manylinux: musllinux_1_2
       - name: Install built wheel
         if: "startsWith(matrix.target, 'x86_64')"
