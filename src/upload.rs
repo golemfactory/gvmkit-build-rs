@@ -1,9 +1,12 @@
+use std::collections::VecDeque;
 use std::env;
 
 use anyhow::anyhow;
 use futures_util::{stream, StreamExt};
+use humansize::DECIMAL;
 use indicatif::{MultiProgress, ProgressBar};
 use std::path::{Path, PathBuf};
+use std::time::{Duration, Instant};
 
 use reqwest::{multipart, Body};
 use serde_json::json;
@@ -424,6 +427,65 @@ pub async fn push_chunks(
     pb_chunks.set_message("Chunked upload");
     pb_total.set_message("Total upload");
 
+    let upload_speed = tokio::spawn({
+        let pb_details = pb_details.clone();
+        async move {
+            let mut ticks = VecDeque::<u64>::new();
+            let mut instant = Instant::now();
+            let total_start = Instant::now();
+            let total_start_pos = pb_details.position();
+            let mut loop_no = 0_u64;
+            pb_details.set_message("Upload speed: NA, Total speed: NA, ETA: NA");
+            loop {
+                ticks.push_front(pb_details.position());
+                if ticks.len() > 11 {
+                    ticks.pop_back();
+                }
+
+                if ticks.len() > 1 {
+                    let speed =
+                        (ticks[0] - ticks[ticks.len() - 1]) as f64 / (ticks.len() - 1) as f64;
+                    let total_speed = (pb_details.position() - total_start_pos) as f64
+                        / total_start.elapsed().as_secs_f64();
+                    let eta_str = if speed > 100.0 {
+                        let sec_left = (pb_details.length().unwrap_or(1) - pb_details.position())
+                            as f64
+                            / speed;
+                        if sec_left > 0.0 {
+                            humantime::format_duration(Duration::from_secs(sec_left as u64))
+                                .to_string()
+                        } else {
+                            "NA".to_string()
+                        }
+                    } else {
+                        "NA".to_string()
+                    };
+                    pb_details.set_message(format!(
+                        "Upload speed: {}/s, Total speed: {}/s, ETA: {}",
+                        humansize::format_size(speed as u64, DECIMAL),
+                        humansize::format_size(total_speed as u64, DECIMAL),
+                        eta_str
+                    ));
+                }
+
+                //log::error!("{}", pb_details.position());
+
+                let elapsed = instant.elapsed().as_secs_f64();
+                loop_no += 1;
+                let target_elapsed = loop_no as f64;
+                let sleep_time = target_elapsed - elapsed;
+                if sleep_time < 0.0 {
+                    //something went wrong (probably sleep or hang)
+                    instant = Instant::now();
+                    loop_no = 0;
+                    ticks.clear();
+                    continue;
+                }
+                tokio::time::sleep(Duration::from_secs_f64(sleep_time)).await;
+            }
+        }
+    });
+
     let mut futures = stream::iter(chunks_to_upload.iter().map(|chunk| {
         tokio::spawn(upload_single_chunk(
             PathBuf::from(file_path),
@@ -450,12 +512,15 @@ pub async fn push_chunks(
             }
         }
     }
+    //stop task that updates upload speed
+    upload_speed.abort();
     pb_chunks.finish_and_clear();
     pb_details.finish_and_clear();
     pb_total.finish_and_clear();
     mc.remove(&pb_chunks);
     mc.remove(&pb_details);
     mc.remove(&pb_total);
+
     println!(" -- chunked upload finished successfully");
     Ok(())
 }
