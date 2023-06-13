@@ -450,6 +450,9 @@ pub async fn push_chunks(
             }
         }
     }
+    pb_chunks.finish_and_clear();
+    pb_details.finish_and_clear();
+    pb_total.finish_and_clear();
     mc.remove(&pb_chunks);
     mc.remove(&pb_details);
     mc.remove(&pb_total);
