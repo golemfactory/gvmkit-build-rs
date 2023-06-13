@@ -5,9 +5,9 @@ mod docker;
 mod image;
 mod login;
 mod metadata;
+mod progress;
 mod upload;
 mod wrapper;
-mod progress;
 
 use crate::image::{ImageBuilder, ImageName};
 
@@ -84,10 +84,10 @@ use tokio::fs;
 
 use crate::chunks::FileChunkDesc;
 use crate::login::remove_credentials;
+use crate::progress::set_progress_bar_settings;
 use crate::upload::{attach_to_repo, full_upload, resolve_repo, upload_descriptor};
 use tokio::fs::File;
 use tokio::io::AsyncWriteExt;
-use crate::progress::set_progress_bar_settings;
 
 #[tokio::main()]
 async fn main() -> anyhow::Result<()> {

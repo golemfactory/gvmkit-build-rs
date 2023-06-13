@@ -19,6 +19,7 @@ use indicatif::{MultiProgress, ProgressBar, ProgressStyle};
 
 use crate::image::name::ImageName;
 use crate::metadata::{add_metadata_outside, read_metadata_outside};
+use crate::progress::{create_chunk_pb, ProgressBarType};
 use std::sync::Arc;
 use tokio::sync::Mutex;
 
@@ -94,11 +95,6 @@ impl ImageBuilder {
         let tag_from_image_name = parsed_name.tag;
 
         if docker.inspect_image(&self.image_name).await.is_err() {
-            let sty =
-                ProgressStyle::with_template("[{msg:20}] {wide_bar:.cyan/blue} {pos:9}/{len:9}")
-                    .unwrap()
-                    .progress_chars("##-");
-
             let mp = MultiProgress::new();
             let layers = Arc::new(Mutex::new(HashMap::<String, ProgressBar>::new()));
 
@@ -136,9 +132,11 @@ impl ImageBuilder {
                                 pb.clone()
                             } else {
                                 //log::info!(" -- new Layer: {:?}", ev);
-                                let pb = mp.add(ProgressBar::new(1));
-                                pb.set_style(sty.clone());
+                                let pb = create_chunk_pb(1, ProgressBarType::PullLayer);
                                 layers.insert(id.clone(), pb.clone());
+                                if !pb.is_hidden() {
+                                    mp.add(pb.clone());
+                                }
                                 pb
                             }
                         };
@@ -366,7 +364,8 @@ impl ImageBuilder {
             .unwrap()
             .progress_chars("##-");
             let pc = ProgressContext::new();
-            let pb = ProgressBar::new(image_size as u64);
+
+            let pb = create_chunk_pb(image_size as u64, ProgressBarType::CopyingFiles);
             pb.set_style(sty.clone());
             pb.set_message("Copying files from /");
             let input = stream_with_progress(input, &pb, pc.clone());
@@ -404,22 +403,15 @@ impl ImageBuilder {
 
         let mp = MultiProgress::new();
 
-        let pg1 = ProgressBar::new(image_size as u64);
-        let pg2 = ProgressBar::new(image_size as u64);
+        let pg1 = create_chunk_pb(image_size as u64, ProgressBarType::PullLine1);
+        let pg2 = create_chunk_pb(image_size as u64, ProgressBarType::PullLine2);
 
-        mp.add(pg1.clone());
-        mp.add(pg2.clone());
-
-        let sty1 = ProgressStyle::with_template("{wide_bar:.cyan/blue}")
-            .unwrap()
-            .progress_chars("##-");
-        let sty2 =
-            ProgressStyle::with_template("{bytes:9}/(estimated){total_bytes:9} [{wide_msg}]")
-                .unwrap()
-                .progress_chars("##-");
-
-        pg1.set_style(sty1);
-        pg2.set_style(sty2);
+        if !pg1.is_hidden() {
+            mp.add(pg1.clone());
+        }
+        if !pg2.is_hidden() {
+            mp.add(pg2.clone());
+        }
 
         docker
             .logs::<String>(

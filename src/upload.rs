@@ -2,7 +2,7 @@ use std::env;
 
 use anyhow::anyhow;
 use futures_util::{stream, StreamExt};
-use indicatif::{MultiProgress, ProgressBar, ProgressStyle};
+use indicatif::{MultiProgress, ProgressBar};
 use std::path::{Path, PathBuf};
 
 use reqwest::{multipart, Body};
@@ -255,7 +255,8 @@ pub async fn push_descr(file_path: &Path) -> anyhow::Result<()> {
     let form = multipart::Form::new();
     let pb = create_chunk_pb(1, ProgressBarType::DescriptorUpload);
 
-    let file_stream = stream_file_with_progress(file_path, None, Some(pb.clone()), None).await?;
+    let file_stream =
+        stream_file_with_progress(file_path, None, Some(pb.clone()), None, None).await?;
     let body = Body::wrap_stream(file_stream);
     let some_file = multipart::Part::stream(body)
         .file_name("descriptor.txt")
@@ -296,8 +297,9 @@ pub async fn upload_single_chunk(
     //file_descr: FileChunkDesc,
     descr_sha256: String,
     mc: MultiProgress,
-    pb: ProgressBar,
-    pb2: ProgressBar,
+    pb_chunks: ProgressBar,
+    pb_details: ProgressBar,
+    pb_total: ProgressBar,
 ) -> anyhow::Result<()> {
     let repo_url = resolve_repo().await?;
     //println!("Uploading image to: {}", repo_url);
@@ -323,7 +325,8 @@ pub async fn upload_single_chunk(
             end: (chunk.pos + chunk.len) as usize,
         }),
         Some(pb_chunk.clone()),
-        Some(pb2.clone()),
+        Some(pb_details.clone()),
+        Some(pb_total.clone()),
     )
     .await?;
     let body = Body::wrap_stream(chunk_stream);
@@ -344,7 +347,7 @@ pub async fn upload_single_chunk(
     match res {
         Ok(res) => {
             if res.status().is_success() {
-                pb.inc(1);
+                pb_chunks.inc(1);
                 Ok(())
             } else {
                 let status = res.status();
@@ -383,10 +386,14 @@ pub async fn push_chunks(
     let total_chunk_length = file_descr.chunks.len();
 
     let mc = MultiProgress::new();
-    let pb_chunks = create_chunk_pb(total_chunk_length as u64, ProgressBarType::UploadChunks);
     let pb_total = create_chunk_pb(file_descr.size, ProgressBarType::UploadTotal);
+    let pb_details = create_chunk_pb(file_descr.size, ProgressBarType::UploadDetails);
+    let pb_chunks = create_chunk_pb(total_chunk_length as u64, ProgressBarType::UploadChunks);
     if !pb_total.is_hidden() {
         mc.add(pb_total.clone());
+    }
+    if !pb_details.is_hidden() {
+        mc.add(pb_details.clone());
     }
     if !pb_chunks.is_hidden() {
         mc.add(pb_chunks.clone());
@@ -400,6 +407,7 @@ pub async fn push_chunks(
                 .ok_or(anyhow!("Chunk number {} is out of bounds", f.chunk_no))?;
             if is_uploaded == 1 {
                 pb_chunks.inc(1);
+                pb_details.inc(f.len);
                 pb_total.inc(f.len);
                 log::debug!("Chunk {} already uploaded, skipping", f.chunk_no);
                 continue;
@@ -422,6 +430,7 @@ pub async fn push_chunks(
             descr_sha256.clone(),
             mc.clone(),
             pb_chunks.clone(),
+            pb_details.clone(),
             pb_total.clone(),
         ))
     }))
