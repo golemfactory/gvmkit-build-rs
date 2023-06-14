@@ -1,9 +1,12 @@
+use std::collections::VecDeque;
 use std::env;
 
 use anyhow::anyhow;
 use futures_util::{stream, StreamExt};
-use indicatif::{MultiProgress, ProgressBar, ProgressStyle};
+use humansize::DECIMAL;
+use indicatif::{MultiProgress, ProgressBar};
 use std::path::{Path, PathBuf};
+use std::time::{Duration, Instant};
 
 use reqwest::{multipart, Body};
 use serde_json::json;
@@ -12,7 +15,8 @@ use tokio::io::AsyncReadExt;
 
 use crate::chunks::{FileChunk, FileChunkDesc};
 use crate::image::ImageName;
-use crate::wrapper::{stream_file_with_progress, ProgressContext};
+use crate::progress::{create_chunk_pb, ProgressBarType};
+use crate::wrapper::stream_file_with_progress;
 
 async fn loads_bytes_and_sha(descr_path: &Path) -> anyhow::Result<(Vec<u8>, String)> {
     let file_descr_bytes = tokio::fs::read(descr_path).await?;
@@ -219,6 +223,8 @@ pub async fn full_upload(
     let vu = validate_upload(descr_path).await?;
     if vu.status.unwrap_or_default() != "full" {
         return Err(anyhow!("Failed to validate image upload"));
+    } else {
+        println!(" -- image validated successfully");
     }
 
     Ok(())
@@ -240,7 +246,6 @@ pub async fn validate_upload(file_descr: &Path) -> anyhow::Result<ValidateUpload
         .map_err(|e| anyhow::anyhow!("Repository status check failed: {}", e))?;
 
     let response = response.json::<ValidateUploadResponse>().await?;
-    //println!("Response: {:?}", response);
     Ok(response)
 }
 
@@ -252,15 +257,10 @@ pub async fn push_descr(file_path: &Path) -> anyhow::Result<()> {
     let descr_endpoint = format!("{repo_url}/v1/image/push/descr").replace("//v1", "/v1");
     let client = reqwest::Client::new();
     let form = multipart::Form::new();
-    let pc = ProgressContext::new();
-    let pb = ProgressBar::new(1);
-    let sty = ProgressStyle::with_template("[{msg:20}] {wide_bar:.cyan/blue} {pos:9}/{len:9}")
-        .unwrap()
-        .progress_chars("##-");
+    let pb = create_chunk_pb(1, ProgressBarType::DescriptorUpload);
 
-    pb.set_style(sty.clone());
-
-    let file_stream = stream_file_with_progress(file_path, None, &pb, pc).await?;
+    let file_stream =
+        stream_file_with_progress(file_path, None, Some(pb.clone()), None, None).await?;
     let body = Body::wrap_stream(file_stream);
     let some_file = multipart::Part::stream(body)
         .file_name("descriptor.txt")
@@ -301,8 +301,9 @@ pub async fn upload_single_chunk(
     //file_descr: FileChunkDesc,
     descr_sha256: String,
     mc: MultiProgress,
-    sty: ProgressStyle,
-    pb: ProgressBar,
+    pb_chunks: ProgressBar,
+    pb_details: ProgressBar,
+    pb_total: ProgressBar,
 ) -> anyhow::Result<()> {
     let repo_url = resolve_repo().await?;
     //println!("Uploading image to: {}", repo_url);
@@ -315,10 +316,10 @@ pub async fn upload_single_chunk(
     let form = form.text("chunk-sha256", hex::encode(chunk.sha256));
     let form = form.text("chunk-pos", chunk.pos.to_string());
     let form = form.text("chunk-len", chunk.len.to_string());
-    let pc = ProgressContext::new();
-    let pb_chunk = ProgressBar::new(chunk.len);
-    pb_chunk.set_style(sty.clone());
-    mc.add(pb_chunk.clone());
+    let pb_chunk = create_chunk_pb(chunk.len, ProgressBarType::SingleChunk);
+    if !pb_chunk.is_hidden() {
+        mc.add(pb_chunk.clone());
+    }
     pb_chunk.set_message(format!("Chunk {}", chunk.chunk_no + 1,));
 
     let chunk_stream = stream_file_with_progress(
@@ -327,8 +328,9 @@ pub async fn upload_single_chunk(
             start: chunk.pos as usize,
             end: (chunk.pos + chunk.len) as usize,
         }),
-        &pb_chunk,
-        pc,
+        Some(pb_chunk.clone()),
+        Some(pb_details.clone()),
+        Some(pb_total.clone()),
     )
     .await?;
     let body = Body::wrap_stream(chunk_stream);
@@ -349,8 +351,7 @@ pub async fn upload_single_chunk(
     match res {
         Ok(res) => {
             if res.status().is_success() {
-                pb.inc(1);
-                //println!("Image uploaded successfully");
+                pb_chunks.inc(1);
                 Ok(())
             } else {
                 let status = res.status();
@@ -386,6 +387,22 @@ pub async fn push_chunks(
             .await
             .map_err(|e| anyhow!("File not readable: {} {e:?}", file_path.display()))?;
     }
+    let total_chunk_length = file_descr.chunks.len();
+
+    let mc = MultiProgress::new();
+    let pb_total = create_chunk_pb(file_descr.size, ProgressBarType::UploadTotal);
+    let pb_details = create_chunk_pb(file_descr.size, ProgressBarType::UploadDetails);
+    let pb_chunks = create_chunk_pb(total_chunk_length as u64, ProgressBarType::UploadChunks);
+    if !pb_total.is_hidden() {
+        mc.add(pb_total.clone());
+    }
+    if !pb_details.is_hidden() {
+        mc.add(pb_details.clone());
+    }
+    if !pb_chunks.is_hidden() {
+        mc.add(pb_chunks.clone());
+    }
+
     let chunks_to_upload = if let Some(uploaded_chunks) = uploaded_chunks {
         let mut chunks = Vec::<FileChunk>::new();
         for f in file_descr.chunks {
@@ -393,6 +410,9 @@ pub async fn push_chunks(
                 .get(f.chunk_no as usize)
                 .ok_or(anyhow!("Chunk number {} is out of bounds", f.chunk_no))?;
             if is_uploaded == 1 {
+                pb_chunks.inc(1);
+                pb_details.inc(f.len);
+                pb_total.inc(f.len);
                 log::debug!("Chunk {} already uploaded, skipping", f.chunk_no);
                 continue;
             } else {
@@ -404,15 +424,67 @@ pub async fn push_chunks(
         file_descr.chunks
     };
 
-    let sty = ProgressStyle::with_template("[{msg:20}] {wide_bar:.cyan/blue} {pos:9}/{len:9}")
-        .unwrap()
-        .progress_chars("##-");
-    let mc = MultiProgress::new();
-    let pb = ProgressBar::new(chunks_to_upload.len() as u64);
-    pb.set_style(sty.clone());
-    mc.add(pb.clone());
+    pb_chunks.set_message("Chunked upload");
+    pb_total.set_message("Total upload");
 
-    pb.set_message("Chunked upload");
+    let upload_speed = tokio::spawn({
+        let pb_details = pb_details.clone();
+        async move {
+            let mut ticks = VecDeque::<u64>::new();
+            let mut instant = Instant::now();
+            let total_start = Instant::now();
+            let total_start_pos = pb_details.position();
+            let mut loop_no = 0_u64;
+            pb_details.set_message("Upload speed: NA, Total speed: NA, ETA: NA");
+            loop {
+                ticks.push_front(pb_details.position());
+                if ticks.len() > 11 {
+                    ticks.pop_back();
+                }
+
+                if ticks.len() > 1 {
+                    let speed =
+                        (ticks[0] - ticks[ticks.len() - 1]) as f64 / (ticks.len() - 1) as f64;
+                    let total_speed = (pb_details.position() - total_start_pos) as f64
+                        / total_start.elapsed().as_secs_f64();
+                    let eta_str = if speed > 100.0 {
+                        let sec_left = (pb_details.length().unwrap_or(1) - pb_details.position())
+                            as f64
+                            / speed;
+                        if sec_left > 0.0 {
+                            humantime::format_duration(Duration::from_secs(sec_left as u64))
+                                .to_string()
+                        } else {
+                            "NA".to_string()
+                        }
+                    } else {
+                        "NA".to_string()
+                    };
+                    pb_details.set_message(format!(
+                        "Upload speed: {}/s, Total speed: {}/s, ETA: {}",
+                        humansize::format_size(speed as u64, DECIMAL),
+                        humansize::format_size(total_speed as u64, DECIMAL),
+                        eta_str
+                    ));
+                }
+
+                //log::error!("{}", pb_details.position());
+
+                let elapsed = instant.elapsed().as_secs_f64();
+                loop_no += 1;
+                let target_elapsed = loop_no as f64;
+                let sleep_time = target_elapsed - elapsed;
+                if sleep_time < 0.0 {
+                    //something went wrong (probably sleep or hang)
+                    instant = Instant::now();
+                    loop_no = 0;
+                    ticks.clear();
+                    continue;
+                }
+                tokio::time::sleep(Duration::from_secs_f64(sleep_time)).await;
+            }
+        }
+    });
 
     let mut futures = stream::iter(chunks_to_upload.iter().map(|chunk| {
         tokio::spawn(upload_single_chunk(
@@ -420,8 +492,9 @@ pub async fn push_chunks(
             chunk.clone(),
             descr_sha256.clone(),
             mc.clone(),
-            sty.clone(),
-            pb.clone(),
+            pb_chunks.clone(),
+            pb_details.clone(),
+            pb_total.clone(),
         ))
     }))
     .buffer_unordered(upload_workers);
@@ -434,11 +507,21 @@ pub async fn push_chunks(
                 }
             },
             Err(e) => {
-                println!("Image upload failed: {:?}", e);
+                log::error!("Image upload failed: {:?}", e);
                 return Err(anyhow!("Image upload failed: {:?}", e));
             }
         }
     }
+    //stop task that updates upload speed
+    upload_speed.abort();
+    pb_chunks.finish_and_clear();
+    pb_details.finish_and_clear();
+    pb_total.finish_and_clear();
+    mc.remove(&pb_chunks);
+    mc.remove(&pb_details);
+    mc.remove(&pb_total);
+
+    println!(" -- chunked upload finished successfully");
     Ok(())
 }
 /*

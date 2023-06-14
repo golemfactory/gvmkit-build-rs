@@ -5,6 +5,7 @@ mod docker;
 mod image;
 mod login;
 mod metadata;
+mod progress;
 mod upload;
 mod wrapper;
 
@@ -75,11 +76,15 @@ struct CmdArgs {
     /// Specify number of upload workers (default 4)
     #[arg(help_heading = Some("Portal"), long, default_value = "4")]
     upload_workers: usize,
+    /// Hide progress bars during operation
+    #[arg(help_heading = Some("Extra options"), long)]
+    hide_progress: bool,
 }
 use tokio::fs;
 
 use crate::chunks::FileChunkDesc;
 use crate::login::remove_credentials;
+use crate::progress::set_progress_bar_settings;
 use crate::upload::{attach_to_repo, full_upload, resolve_repo, upload_descriptor};
 use tokio::fs::File;
 use tokio::io::AsyncWriteExt;
@@ -94,6 +99,10 @@ async fn main() -> anyhow::Result<()> {
     env_logger::init();
 
     let cmdargs = <CmdArgs as Parser>::parse();
+
+    set_progress_bar_settings(progress::ProgressBarSettings {
+        hidden: cmdargs.hide_progress,
+    });
 
     if cmdargs.nologin && cmdargs.push_to.is_some() {
         return Err(anyhow::anyhow!(
@@ -127,7 +136,6 @@ async fn main() -> anyhow::Result<()> {
             Err(anyhow::anyhow!("Login is not valid"))
         };
     }
-
     let push_image_name = if !cmdargs.nologin {
         if let Some(push_to) = &cmdargs.push_to {
             //pushing to user/repository:tag given by the user
@@ -159,7 +167,7 @@ async fn main() -> anyhow::Result<()> {
         None
     };
 
-    let (user_name, pat) = if !cmdargs.nologin {
+    let (user_name, pat) = if !cmdargs.nologin && (cmdargs.push_to.is_some() || cmdargs.push) {
         println!("Logging in to golem registry: {}", resolve_repo().await?);
 
         if let (Ok(registry_user), Ok(registry_token)) =
