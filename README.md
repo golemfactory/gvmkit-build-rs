@@ -40,10 +40,8 @@ They can be prepared from docker images using this (gvmkit-build) tool.
 
 The tool as main argument is taking docker image name.
 
-Docker Image id is composed maximum of 3 parts:
-<username>/<image_name>:<tag>
-It can be also for example
-<image_name>
+Docker Image id is composed maximum of three parts: ```<username>/<image_name>:tag```
+It can be also for example ```<image_name>``` (tag is defaulting to latest)
 
 Following command will build image and create *.gvmi file in current directory
 ```
@@ -54,11 +52,11 @@ If image not exist locally the tool is trying to pull it from docker hub.
 
 To successfully add image to registry portal you have to name image accordingly or use
 ```
-gvmkit-build <user_name><image_name>/<tag> --push
+gvmkit-build <user_name>/<image_name>:<tag> --push
 ```
 or if your local image name is not compatible use
 ```
-gvmkit-build <docker_image_id> --push-to <user_name><image_name>/<tag>
+gvmkit-build <docker_image_id> --push-to <user_name>/<image_name>:<tag>
 ```
 
 ## Build process explained a bit
@@ -86,6 +84,8 @@ For managing docker images and containers bollard library is used. https://docs.
 
 The tool is using https://registry.golem.network as default registry portal.
 You can change this behaviour by setting `REGISTRY_URL` environment variable.
+You should create account on registry portal and generate access token for your user.
+If you really don't want to create account you can use anonymous upload (see section below about anonymous upload).
 
 The tool will ask for login when --login --push or --push-to option is specified.
 
