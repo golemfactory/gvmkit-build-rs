@@ -2,18 +2,18 @@
 
 Golem VM Image builder used as companion app for Golem Registry: https://registry.golem.network
 
-# Requirements
+## Requirements
 
 Running docker engine is required. Tool supports Linux, Windows and macOS.
 Note that when using macOS ARM version use --platform linux/amd64 option for docker builds.
 
-# Images
+## Images
 
 Golem Network is using gvmi images as base for creating VMs for tasks.
 These images are basically squashfs images with some additional metadata.
 They can be prepared from docker images using this (gvmkit-build) tool.
 
-# naming image
+## Naming image
 
 The tool as main argument is taking docker image name.
 
@@ -39,7 +39,7 @@ gvmkit-build <docker_image_id> --push-to <user_name><image_name>/<tag>
 ```
 
 
-# troubleshooting login to registry portal
+## Troubleshooting login to registry portal
 
 The tool is using https://registry.golem.network as default registry portal.
 You can change this behaviour by setting `REGISTRY_URL` environment variable.
@@ -76,12 +76,12 @@ REGISTRY_TOKEN=<access-token-generated-in-registry-portal>
 
 When REGISTRY_USER/REGISTRY_TOKEN is set in environment variables, secure rpassword storage won't be used.
 
-# uploading to multiple tags
+## Uploading to multiple tags
 
 The tool cannot upload to multiple tags, but you can call it multiple times with different tags.
 All steps of operations are cached so no worry about reuploading same file multiple times.
 
-# uploading large files
+## Uploading large files
 
 The tool is using chunked upload with default chunk size 10MB (changing not recommended).
 4 upload workers are created by default. If you think your upload is stuck you
@@ -90,7 +90,7 @@ will be uploaded again.
 
 Note: Total limit of chunks is set to 1000 (so 10GB by default). If you want to upload larger file you have to set greater chunk size accordingly.
 
-# uploading image without login
+## Uploading image without login
 
 You can upload images anonymously. Note that lifetime of such images is limited, 
 and they can be removed from registry portal after some time without notice
@@ -99,11 +99,11 @@ and they can be removed from registry portal after some time without notice
 cargo run --release -- <image_name> --push --nologin
 ```
 
-# changing squashfs options when creating image
+## Changing squashfs options when creating image
 
 You can change compression used in mskquashfs to produce more or less compact images. 
 
-Look for help for more information
+Look for help for more information. Note that currently zstd is not supported by Golem Network (you can use xz instead for extra compact images).
 ```
 gvmkit-build --help
 ```
