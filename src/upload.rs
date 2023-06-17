@@ -282,8 +282,9 @@ pub async fn push_descr(file_path: &Path) -> anyhow::Result<()> {
                 println!(" -- download link: {}/download/{}", repo_url, descr_sha256);
             } else {
                 return Err(anyhow::anyhow!(
-                    "Image upload failed with code {}",
-                    res.status().as_u16()
+                    "Image upload failed with code {}: {}",
+                    res.status().as_u16(),
+                    res.text().await.unwrap_or_default()
                 ));
             }
             Ok(())
