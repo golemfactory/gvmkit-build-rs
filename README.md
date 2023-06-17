@@ -9,20 +9,25 @@ Note that when using macOS ARM version use --platform linux/amd64 option for doc
 
 ## Installation
 
+You can install gvmkit-build using pip (python3 with pip installer is required)
 ```
 pip install gvmkit-build
 ```
-or
+or install form npm (npm installation is required)
 ```
 npm install -g gvmkit-build
+```
+or install using cargo (Rust toolchain is required, a bit slow because it compiles from sources)
+```
+cargo install gvmkit-build
 ```
 or download prebuild from github releases page:
 
 https://github.com/golemfactory/gvmkit-build-rs/releases
 
-or build from sources, you can find binary in target/release-lto/gvmkit-build (or gvmkit-build.exe on Windows)
+or build from sources, you can find binary in target/release/gvmkit-build (or gvmkit-build.exe on Windows)
 ```
-cargo build --profile release-lto
+cargo build --release
 ```
 
 ## Images
