@@ -122,8 +122,8 @@ All steps of operations are cached so no worry about re-uploading same file mult
 ## Uploading large files
 
 The tool is using chunked upload with default chunk size 10MB (changing not recommended).
-4 upload workers are created by default. If you think your upload is stuck you
-can always stop and run tool again to finish download. Only chunks that were not uploaded
+Four upload workers are created by default (you can increase/decrease number of workers using --upload-workers argument depending on your network conditions). 
+If you think your upload is stuck you can always stop and run tool again to finish download. Only chunks that were not uploaded
 will be uploaded again.
 
 Note: Total limit of chunks is set to 1000 (so 10GB by default). If you want to upload larger file you have to set greater chunk size accordingly.
@@ -142,11 +142,11 @@ cargo run --release -- <image_name> --push --nologin
 If you are sure that you have proper *.gvmi file for example my-test.gvmi you can use 
 
 ```
-gvmkit-build --direct_file_upload my-test.gvmi --push-to <user_name><image_name>/<tag>
+gvmkit-build --direct-file-upload my-test.gvmi --push-to <user_name><image_name>/<tag>
 ```
-or ananymously
+or anonymously
 ```
-gvmkit-build --direct_file_upload my-test.gvmi --push --nologin
+gvmkit-build --direct-file-upload my-test.gvmi --push --nologin
 ```
 
 ## Changing squashfs options when creating image
