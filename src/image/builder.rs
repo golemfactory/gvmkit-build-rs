@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 
 use std::{
-    fs,
+    env, fs,
     path::{Path, PathBuf},
 };
 
@@ -274,34 +274,43 @@ impl ImageBuilder {
 
         println!(" -- Container id: {}", &container_id[0..12]);
 
-        let tool_image_name = "scx1332/squashfs";
-        println!(
-            " * Step4 - create tool container used for gvmi generation: {} ...",
-            tool_image_name
-        );
+        let tool_image_name =
+            env::var("SQUASHFS_IMAGE_NAME").unwrap_or("scx1332/squashfs".to_string());
 
-        match docker
-            .create_image(
-                Some(image::CreateImageOptions {
-                    from_image: tool_image_name,
-                    tag: "latest",
-                    ..Default::default()
-                }),
-                None,
-                None,
-            )
-            .try_for_each(|ev| async move {
-                log::debug!("{:?}", ev);
-                Ok(())
-            })
-            .await
-        {
-            Ok(_) => {}
-            Err(err) => {
-                log::error!("Failed to create image: {} {}", tool_image_name, err);
-                return Err(anyhow::anyhow!("Failed to create image: {}", err));
-            }
-        };
+        if docker.inspect_image(&tool_image_name).await.is_err() {
+            println!(
+                " * Step4 - pulling tool image used for gvmi generation: {} ...",
+                tool_image_name
+            );
+
+            match docker
+                .create_image(
+                    Some(image::CreateImageOptions {
+                        from_image: tool_image_name.as_str(),
+                        tag: "latest",
+                        ..Default::default()
+                    }),
+                    None,
+                    None,
+                )
+                .try_for_each(|ev| async move {
+                    log::debug!("{:?}", ev);
+                    Ok(())
+                })
+                .await
+            {
+                Ok(_) => {}
+                Err(err) => {
+                    log::error!("Failed to create image: {} {}", tool_image_name, err);
+                    return Err(anyhow::anyhow!("Failed to create image: {}", err));
+                }
+            };
+        } else {
+            println!(
+                " * Step4 - tool image used for gvmi generation already exists: {} ...",
+                tool_image_name
+            );
+        }
 
         let copy_result: anyhow::Result<_> = async {
             let mut mksquash_command = vec![

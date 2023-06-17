@@ -63,6 +63,18 @@ After copying is finished mksquashfs command is used inside tool container to cr
 After adding metadata *.gvmi file is created and tool container removed.
 Note that tool image will stay downloaded on your machine for future use (it is quite small so no worry about disk space)
 
+## [Optional] - building squashfs-tools image
+
+If you want to use your own tool without pulling from dockerhub:
+Go to squashfs-tools directory and run
+```
+docker build . -t my_squash_fs_builder
+```
+add environment variable to .env in folder where you run gvmkit-build
+```
+SQUASHFS_IMAGE_NAME=my_squash_fs_builder 
+```
+
 For managing docker images and containers bollard library is used. https://docs.rs/bollard/latest/bollard/
 
 ## Troubleshooting login to registry portal
@@ -105,7 +117,7 @@ When REGISTRY_USER/REGISTRY_TOKEN is set in environment variables, secure rpassw
 ## Uploading to multiple tags
 
 The tool cannot upload to multiple tags, but you can call it multiple times with different tags.
-All steps of operations are cached so no worry about reuploading same file multiple times.
+All steps of operations are cached so no worry about re-uploading same file multiple times.
 
 ## Uploading large files
 
@@ -125,6 +137,18 @@ and they can be removed from registry portal after some time without notice
 cargo run --release -- <image_name> --push --nologin
 ```
 
+## Uploading image without building part
+
+If you are sure that you have proper *.gvmi file for example my-test.gvmi you can use 
+
+```
+gvmkit-build --direct_file_upload my-test.gvmi --push-to <user_name><image_name>/<tag>
+```
+or ananymously
+```
+gvmkit-build --direct_file_upload my-test.gvmi --push --nologin
+```
+
 ## Changing squashfs options when creating image
 
 You can change compression used in mksquashfs to produce more or less compact images. 
@@ -133,4 +157,3 @@ Look for help for more information. Note that currently zstd is not supported by
 ```
 gvmkit-build --help
 ```
-
