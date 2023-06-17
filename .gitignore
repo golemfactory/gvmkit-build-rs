@@ -2,3 +2,4 @@
 *.gvmi
 /target/
 /.env
+/*.bin

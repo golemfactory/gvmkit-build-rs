@@ -5,7 +5,7 @@ use std::path::Path;
 use tokio::fs::File;
 use tokio::io::AsyncReadExt;
 
-const VERSION_AND_HEADER: u64 = 0x333333333;
+const VERSION_AND_HEADER: u64 = 0x333333334;
 
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub struct FileChunk {

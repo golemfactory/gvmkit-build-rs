@@ -16,9 +16,6 @@ use std::path::PathBuf;
 
 use std::env;
 
-const INTERNAL_LOG_LEVEL: &str = "hyper=warn,bollard=warn";
-const DEFAULT_LOG_LEVEL: &str = "info";
-
 const COMPRESSION_POSSIBLE_VALUES: &[&str] = &["lzo", "gzip", "lz4", "zstd", "xz"];
 
 #[derive(Parser, Debug)]
@@ -93,9 +90,8 @@ use tokio::io::AsyncWriteExt;
 async fn main() -> anyhow::Result<()> {
     dotenv::dotenv().ok();
     let log_level =
-        env::var(env_logger::DEFAULT_FILTER_ENV).unwrap_or(DEFAULT_LOG_LEVEL.to_string());
-    let log_filter = format!("{INTERNAL_LOG_LEVEL},{log_level}");
-    env::set_var(env_logger::DEFAULT_FILTER_ENV, log_filter);
+        env::var("RUST_LOG").unwrap_or("info,bollard=warn,hyper=warn".to_string());
+    env::set_var("RUST_LOG", log_level);
     env_logger::init();
 
     let cmdargs = <CmdArgs as Parser>::parse();
