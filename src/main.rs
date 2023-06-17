@@ -71,7 +71,7 @@ struct CmdArgs {
     #[arg(help_heading = Some("Image creation"), long)]
     compression_level: Option<u32>,
     /// Specify chunk size (default 2MB)
-    #[arg(help_heading = Some("Portal"), long, default_value = "2000000")]
+    #[arg(help_heading = Some("Portal"), long, default_value = "10000000")]
     upload_chunk_size: usize,
     /// Specify number of upload workers (default 4)
     #[arg(help_heading = Some("Portal"), long, default_value = "4")]
