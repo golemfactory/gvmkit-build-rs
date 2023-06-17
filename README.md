@@ -7,6 +7,24 @@ Golem VM Image builder used as companion app for Golem Registry: https://registr
 Running docker engine is required. Tool supports Linux, Windows and macOS.
 Note that when using macOS ARM version use --platform linux/amd64 option for docker builds.
 
+## Installation
+
+```
+pip install gvmkit-build
+```
+or
+```
+npm install -g gvmkit-build
+```
+or download prebuild from github releases page:
+
+https://github.com/golemfactory/gvmkit-build-rs/releases
+
+or build from sources, you can find binary in target/release-lto/gvmkit-build (or gvmkit-build.exe on Windows)
+```
+cargo build --profile release-lto
+```
+
 ## Images
 
 Golem Network is using gvmi images as base for creating VMs for tasks.
