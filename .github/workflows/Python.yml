@@ -40,14 +40,14 @@ jobs:
         uses: PyO3/maturin-action@v1
         with:
           target: ${{ matrix.target }}
-          args: --release --out dist -m Cargo.toml
+          args: --profile release-lto --out dist -m Cargo.toml
           manylinux: auto
       - name: Build wheels (musl)
         if: contains(matrix.target, 'musl')
         uses: PyO3/maturin-action@v1
         with:
           target: ${{ matrix.target }}
-          args: --release --out dist -m Cargo.toml
+          args: --profile release-lto --out dist -m Cargo.toml
           manylinux: musllinux_1_2
       - name: Install built wheel
         if: "startsWith(matrix.target, 'x86_64')"
@@ -59,17 +59,23 @@ jobs:
           name: wheels
           path: dist
       - name: "Archive binary"
-        if: "matrix.runs-on != 'windows-latest'"
+        if: "matrix.runs-on == 'ubuntu-latest'"
         run: |
           ARCHIVE_FILE=gvmkit-build-${{ matrix.target }}.tar.gz
-          tar czvf $ARCHIVE_FILE -C target/${{ matrix.target }}/release gvmkit-build
+          tar czvf $ARCHIVE_FILE -C target/${{ matrix.target }}/release-lto gvmkit-build
+          shasum -a 256 $ARCHIVE_FILE > $ARCHIVE_FILE.sha256
+      - name: "Archive binary"
+        if: "matrix.runs-on == 'macos-latest'"
+        run: |
+          ARCHIVE_FILE=gvmkit-build-${{ matrix.target }}.tar.gz
+          gtar --format=pax -czvf $ARCHIVE_FILE -C target/${{ matrix.target }}/release-lto gvmkit-build
           shasum -a 256 $ARCHIVE_FILE > $ARCHIVE_FILE.sha256
       - name: "Archive binary"
         shell: bash
         if: "matrix.runs-on == 'windows-latest'"
         run: |
             ARCHIVE_FILE=gvmkit-build-${{ matrix.target }}.zip
-            7z a $ARCHIVE_FILE ./target/${{ matrix.target }}/release/gvmkit-build.exe          
+            7z a $ARCHIVE_FILE ./target/${{ matrix.target }}/release-lto/gvmkit-build.exe          
             sha256sum $ARCHIVE_FILE > $ARCHIVE_FILE.sha256
       - name: "Upload binary"
         uses: actions/upload-artifact@v3

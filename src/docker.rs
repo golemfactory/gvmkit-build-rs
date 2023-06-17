@@ -1,15 +1,3 @@
-use anyhow::anyhow;
-use bollard::{
-    container, exec, image,
-    service::{ContainerConfig, HostConfig, Mount, MountTypeEnum},
-    Docker,
-};
-use bytes::{BufMut, Bytes, BytesMut};
-use futures::TryStreamExt;
-
-use futures_util::StreamExt;
-use std::collections::HashMap;
-
 #[derive(Debug, Clone)]
 pub struct DirectoryMount {
     pub host: String,
@@ -28,8 +16,22 @@ pub struct ContainerOptions {
     pub entrypoint: Option<Vec<String>>,
 }
 
+impl Default for ContainerOptions {
+    fn default() -> Self {
+        ContainerOptions {
+            image_name: "".to_owned(),
+            container_name: "".to_owned(),
+            mounts: None,
+            cmd: None,
+            env: None,
+            volumes: None,
+            entrypoint: None,
+        }
+    }
+}
+/*
 pub struct DockerInstance {
-    docker: Docker,
+    pub docker: Docker,
 }
 
 impl DockerInstance {
@@ -247,3 +249,4 @@ impl DockerInstance {
         Ok((hash, cfg))
     }
 }
+*/
