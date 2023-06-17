@@ -5,6 +5,7 @@ description = "Tool used to build gvmi images used by Golem Network. Companion a
 authors = ["Golem Factory <contact@golem.network>"]
 edition = "2021"
 license = "GPL-3.0"
+repository = "https://github.com/golemfactory/gvmkit-build-rs"
 
 [dependencies]
 anyhow = "1.0"
