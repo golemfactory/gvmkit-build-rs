@@ -38,6 +38,14 @@ or if your local image name is not compatible use
 gvmkit-build <docker_image_id> --push-to <user_name><image_name>/<tag>
 ```
 
+## Build process explained a bit
+
+Tool is creating new container and is copying data from given image to new container.
+After copying is finished mksquashfs command is used inside tool container to create squashfs image.
+After adding metadata *.gvmi file is created and tool container removed.
+Note that tool image will stay downloaded on your machine for future use (it is quite small so no worry about disk space)
+
+For managing docker images and containers bollard library is used. https://docs.rs/bollard/latest/bollard/
 
 ## Troubleshooting login to registry portal
 
@@ -46,7 +54,7 @@ You can change this behaviour by setting `REGISTRY_URL` environment variable.
 
 The tool will ask for login when --login --push or --push-to option is specified.
 
-For storing login information rpassword library is used: https://docs.rs/rpassword/7.2.0/rpassword/
+For storing login information rpassword library is used: https://docs.rs/crate/rpassword/latest
 
 Only one instance of login/token is kept saved at "gvmkit-build-rs/default". So if you login with new user/token old pair will be forgotten.
 
@@ -101,7 +109,7 @@ cargo run --release -- <image_name> --push --nologin
 
 ## Changing squashfs options when creating image
 
-You can change compression used in mskquashfs to produce more or less compact images. 
+You can change compression used in mksquashfs to produce more or less compact images. 
 
 Look for help for more information. Note that currently zstd is not supported by Golem Network (you can use xz instead for extra compact images).
 ```
