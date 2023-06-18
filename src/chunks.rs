@@ -24,9 +24,15 @@ pub struct FileChunkDesc {
     //golem uses sha-3 (sha224) for checking integrity of downloaded images
     pub sha3: [u8; 28],
     pub chunks: Vec<FileChunk>,
+    //descriptor hash of FileChunkDesc, it is used for unique identification of descriptor
+    pub descr_hash: [u8; 32],
 }
 
 impl FileChunkDesc {
+    pub fn get_descr_hash_str(self: &FileChunkDesc) -> String {
+        hex::encode(self.descr_hash)
+    }
+
     pub fn serialize_to_bytes(self: &FileChunkDesc) -> Vec<u8> {
         let expected_length = 8 + 8 + 8 + 28 + self.chunks.len() * 32;
         let mut bytes = Vec::with_capacity(expected_length);
@@ -84,12 +90,16 @@ impl FileChunkDesc {
             ));
         }
 
+        let mut sha256 = sha2::Sha256::new();
+        sha256.update(bytes);
+        let sha256 = sha256.finalize();
         let mut descr = FileChunkDesc {
             version: version_bytes,
             size,
             chunk_size,
             sha3,
             chunks: Vec::with_capacity(number_of_chunks),
+            descr_hash: sha256.into(),
         };
 
         let mut file_pos = 0;
@@ -146,13 +156,20 @@ where
         pb.inc(chunk_size as u64);
     }
 
-    Ok(FileChunkDesc {
+    let mut fcd = FileChunkDesc {
         version: VERSION_AND_HEADER,
         size: file_size,
         chunk_size: chunk_size as u64,
         chunks: file_chunks,
         sha3: sha3.finalize().into(),
-    })
+        descr_hash: [0; 32],
+    };
+
+    let bytes = fcd.serialize_to_bytes();
+    let mut sha2 = sha2::Sha256::new();
+    sha2.update(&bytes);
+    fcd.descr_hash = sha2.finalize().into();
+    Ok(fcd)
 }
 
 pub async fn create_descriptor(path: &Path, chunk_size: usize) -> anyhow::Result<FileChunkDesc> {

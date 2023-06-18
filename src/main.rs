@@ -68,8 +68,8 @@ struct CmdArgs {
     #[arg(help_heading = Some("Image creation"), long)]
     compression_level: Option<u32>,
     /// Specify chunk size (default 2MB)
-    #[arg(help_heading = Some("Portal"), long, default_value = "10000000")]
-    upload_chunk_size: usize,
+    #[arg(help_heading = Some("Portal"), long)]
+    upload_chunk_size: Option<u64>,
     /// Specify number of upload workers (default 4)
     #[arg(help_heading = Some("Portal"), long, default_value = "4")]
     upload_workers: usize,
@@ -82,15 +82,14 @@ use tokio::fs;
 use crate::chunks::FileChunkDesc;
 use crate::login::remove_credentials;
 use crate::progress::set_progress_bar_settings;
-use crate::upload::{attach_to_repo, full_upload, resolve_repo, upload_descriptor};
+use crate::upload::{attach_to_repo, full_upload, upload_descriptor, REGISTRY_URL};
 use tokio::fs::File;
 use tokio::io::AsyncWriteExt;
 
 #[tokio::main()]
 async fn main() -> anyhow::Result<()> {
     dotenv::dotenv().ok();
-    let log_level =
-        env::var("RUST_LOG").unwrap_or("info,bollard=warn,hyper=warn".to_string());
+    let log_level = env::var("RUST_LOG").unwrap_or("info,bollard=warn,hyper=warn".to_string());
     env::set_var("RUST_LOG", log_level);
     env_logger::init();
 
@@ -113,7 +112,7 @@ async fn main() -> anyhow::Result<()> {
         ));
     }
     if cmdargs.login {
-        println!("Logging in to golem registry: {}", resolve_repo().await?);
+        println!("Logging in to golem registry: {}", REGISTRY_URL.as_str());
         login::login(None, true).await?;
         return Ok(());
     }
@@ -124,7 +123,7 @@ async fn main() -> anyhow::Result<()> {
     if cmdargs.login_check {
         println!(
             "Checking login to golem registry: {}",
-            resolve_repo().await?
+            REGISTRY_URL.as_str()
         );
         return if login::check_if_valid_login().await? {
             Ok(())
@@ -164,7 +163,7 @@ async fn main() -> anyhow::Result<()> {
     };
 
     let (user_name, pat) = if !cmdargs.nologin && (cmdargs.push_to.is_some() || cmdargs.push) {
-        println!("Logging in to golem registry: {}", resolve_repo().await?);
+        println!("Logging in to golem registry: {}", REGISTRY_URL.as_str());
 
         if let (Ok(registry_user), Ok(registry_token)) =
             (env::var("REGISTRY_USER"), env::var("REGISTRY_TOKEN"))
@@ -214,11 +213,24 @@ async fn main() -> anyhow::Result<()> {
 
         builder.build().await?
     };
+
+    let image_file_size = fs::metadata(&path).await?.len();
+    let chunk_size = if let Some(chunk_size) = cmdargs.upload_chunk_size {
+        chunk_size
+    } else {
+        if image_file_size > 1024 * 1024 * 500 {
+            10 * 1024 * 1024
+        } else if image_file_size > 1024 * 1024 * 200 {
+            5 * 1024 * 1024
+        } else {
+            2 * 1024 * 1024
+        }
+    };
+
     let descr_path = PathBuf::from(path.display().to_string() + ".descr.bin");
-    {
+    let descr = {
         let path_meta = fs::metadata(&path).await?;
-        let mut recrate_descr = false;
-        if descr_path.exists() {
+        let descr = if descr_path.exists() {
             if fs::metadata(&descr_path)
                 .await?
                 .modified()
@@ -226,25 +238,26 @@ async fn main() -> anyhow::Result<()> {
                 < path_meta.modified().expect("Modified field has to be here")
             {
                 println!(" -- File descriptor is older than image, recreating");
-                recrate_descr = true;
+                None
             } else {
                 match tokio::fs::read(&descr_path).await {
                     Ok(file_descr_bytes) => {
                         match FileChunkDesc::deserialize_from_bytes(&file_descr_bytes) {
                             Ok(descr) => {
-                                if descr.chunk_size != cmdargs.upload_chunk_size as u64 {
+                                if descr.chunk_size != chunk_size {
                                     println!(" -- chunk size changed, recreating file descriptor");
-                                    recrate_descr = true;
+                                    None
                                 } else {
                                     println!(" -- file descriptor already exists and is newer");
                                     println!(" -- image hash: sha3:{}", hex::encode(descr.sha3));
+                                    Some(descr)
                                 }
                             }
                             Err(e) => {
                                 println!(" -- failed to deserialize file descriptor: {}", e);
-                                recrate_descr = true;
+                                None
                             }
-                        };
+                        }
                     }
                     Err(e) => {
                         println!(
@@ -252,40 +265,43 @@ async fn main() -> anyhow::Result<()> {
                             descr_path.display(),
                             e
                         );
-                        recrate_descr = true;
+                        None
                     }
-                };
+                }
             }
         } else {
-            recrate_descr = true;
-        }
-        if recrate_descr {
+            None
+        };
+        if let Some(descr) = descr {
+            descr
+        } else {
             println!(" * Writing file descriptor to {}", descr_path.display());
             let mut file = File::create(&descr_path).await?;
-            let descr = chunks::create_descriptor(&path, cmdargs.upload_chunk_size).await?;
+            let descr = chunks::create_descriptor(&path, chunk_size as usize).await?;
             file.write_all(&descr.serialize_to_bytes()).await?;
             println!(" -- file descriptor created successfully");
             println!(" -- image hash: sha3:{}", hex::encode(descr.sha3));
+            descr
         }
-    }
+    };
 
     if cmdargs.push || cmdargs.push_to.is_some() {
         println!(
             "Uploading image to golem registry: {}",
-            resolve_repo().await?
+            REGISTRY_URL.as_str()
         );
         let full_upload_needed = upload_descriptor(&descr_path).await?;
 
         if full_upload_needed {
             if let Some(push_image_name) = &push_image_name {
-                //check if we can attach to the repo
-                attach_to_repo(&descr_path, push_image_name, &user_name, &pat, true).await?;
+                //check if we can attach to the repo before uploading the file
+                attach_to_repo(&descr.get_descr_hash_str(), push_image_name, &user_name, &pat, true).await?;
             }
-            full_upload(&path, &descr_path, cmdargs.upload_workers).await?;
+            full_upload(&path, &descr, cmdargs.upload_workers).await?;
         }
         if let Some(push_image_name) = &push_image_name {
             //attach to repo after upload
-            attach_to_repo(&descr_path, push_image_name, &user_name, &pat, false).await?;
+            attach_to_repo(&descr.get_descr_hash_str(), push_image_name, &user_name, &pat, false).await?;
         }
     }
 

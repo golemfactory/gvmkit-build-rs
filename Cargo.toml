@@ -1,6 +1,6 @@
 [package]
 name = "gvmkit-build"
-version = "0.3.9"
+version = "0.3.10"
 description = "Tool used to build gvmi images used by Golem Network. Companion app to Golem Registry"
 authors = ["Golem Factory <contact@golem.network>"]
 edition = "2021"
