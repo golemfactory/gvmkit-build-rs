@@ -137,7 +137,7 @@ pub async fn attach_to_repo(
                 text
             )),
             Err(e) => Err(anyhow::anyhow!("Not possible to add to repository: {}", e)),
-        }
+        };
     }
     let text = response.text().await?;
     if check {
@@ -182,7 +182,6 @@ pub async fn full_upload(
 
     if let Some(status) = vu.status {
         if status != "full" {
-
             push_chunks(path, descr, vu.chunks, upload_workers).await?;
         }
     }

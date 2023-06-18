@@ -126,12 +126,12 @@ All steps of operations are cached so no worry about re-uploading same file mult
 
 ## Uploading large files
 
-The tool is using chunked upload with default chunk size 10MB (changing not recommended).
+The tool is using chunked upload with default chunk size 10MiB for images greater than 500MiB (changing not recommended).
 Four upload workers are created by default (you can increase/decrease number of workers using --upload-workers argument depending on your network conditions). 
 If you think your upload is stuck you can always stop and run tool again to finish download. Only chunks that were not uploaded
 will be uploaded again.
 
-Note: Total limit of chunks is set to 1000 (so 10GB by default). If you want to upload larger file you have to set greater chunk size accordingly.
+Note: Total limit of chunks is set to 1000 (so around 10GB by default). If you want to upload larger file you have to set greater chunk size accordingly.
 
 ## Uploading image without login
 

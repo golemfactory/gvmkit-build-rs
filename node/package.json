@@ -1,6 +1,6 @@
 {
   "name": "@golem-sdk/gvmkit-build",
-  "version": "0.3.10",
+  "version": "0.3.11",
   "description": "",
   "main": "binary.js",
   "private": false,

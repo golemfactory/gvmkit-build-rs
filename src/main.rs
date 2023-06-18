@@ -217,14 +217,12 @@ async fn main() -> anyhow::Result<()> {
     let image_file_size = fs::metadata(&path).await?.len();
     let chunk_size = if let Some(chunk_size) = cmdargs.upload_chunk_size {
         chunk_size
+    } else if image_file_size > 1024 * 1024 * 500 {
+        10 * 1024 * 1024
+    } else if image_file_size > 1024 * 1024 * 200 {
+        5 * 1024 * 1024
     } else {
-        if image_file_size > 1024 * 1024 * 500 {
-            10 * 1024 * 1024
-        } else if image_file_size > 1024 * 1024 * 200 {
-            5 * 1024 * 1024
-        } else {
-            2 * 1024 * 1024
-        }
+        2 * 1024 * 1024
     };
 
     let descr_path = PathBuf::from(path.display().to_string() + ".descr.bin");
@@ -295,13 +293,27 @@ async fn main() -> anyhow::Result<()> {
         if full_upload_needed {
             if let Some(push_image_name) = &push_image_name {
                 //check if we can attach to the repo before uploading the file
-                attach_to_repo(&descr.get_descr_hash_str(), push_image_name, &user_name, &pat, true).await?;
+                attach_to_repo(
+                    &descr.get_descr_hash_str(),
+                    push_image_name,
+                    &user_name,
+                    &pat,
+                    true,
+                )
+                .await?;
             }
             full_upload(&path, &descr, cmdargs.upload_workers).await?;
         }
         if let Some(push_image_name) = &push_image_name {
             //attach to repo after upload
-            attach_to_repo(&descr.get_descr_hash_str(), push_image_name, &user_name, &pat, false).await?;
+            attach_to_repo(
+                &descr.get_descr_hash_str(),
+                push_image_name,
+                &user_name,
+                &pat,
+                false,
+            )
+            .await?;
         }
     }
 
