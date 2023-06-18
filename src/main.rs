@@ -68,8 +68,8 @@ struct CmdArgs {
     #[arg(help_heading = Some("Image creation"), long)]
     compression_level: Option<u32>,
     /// Specify chunk size (default 2MB)
-    #[arg(help_heading = Some("Portal"), long, default_value = "10485760")]
-    upload_chunk_size: usize,
+    #[arg(help_heading = Some("Portal"), long)]
+    upload_chunk_size: Option<u64>,
     /// Specify number of upload workers (default 4)
     #[arg(help_heading = Some("Portal"), long, default_value = "4")]
     upload_workers: usize,
@@ -213,6 +213,20 @@ async fn main() -> anyhow::Result<()> {
 
         builder.build().await?
     };
+
+    let image_file_size = fs::metadata(&path).await?.len();
+    let chunk_size = if let Some(chunk_size) = cmdargs.upload_chunk_size {
+        chunk_size
+    } else {
+        if image_file_size > 1024 * 1024 * 500 {
+            10 * 1024 * 1024
+        } else if image_file_size > 1024 * 1024 * 200 {
+            5 * 1024 * 1024
+        } else {
+            2 * 1024 * 1024
+        }
+    };
+
     let descr_path = PathBuf::from(path.display().to_string() + ".descr.bin");
     let descr = {
         let path_meta = fs::metadata(&path).await?;
@@ -230,7 +244,7 @@ async fn main() -> anyhow::Result<()> {
                     Ok(file_descr_bytes) => {
                         match FileChunkDesc::deserialize_from_bytes(&file_descr_bytes) {
                             Ok(descr) => {
-                                if descr.chunk_size != cmdargs.upload_chunk_size as u64 {
+                                if descr.chunk_size != chunk_size {
                                     println!(" -- chunk size changed, recreating file descriptor");
                                     None
                                 } else {
@@ -263,7 +277,7 @@ async fn main() -> anyhow::Result<()> {
         } else {
             println!(" * Writing file descriptor to {}", descr_path.display());
             let mut file = File::create(&descr_path).await?;
-            let descr = chunks::create_descriptor(&path, cmdargs.upload_chunk_size).await?;
+            let descr = chunks::create_descriptor(&path, chunk_size as usize).await?;
             file.write_all(&descr.serialize_to_bytes()).await?;
             println!(" -- file descriptor created successfully");
             println!(" -- image hash: sha3:{}", hex::encode(descr.sha3));
