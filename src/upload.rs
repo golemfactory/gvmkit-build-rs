@@ -8,6 +8,7 @@ use indicatif::{MultiProgress, ProgressBar};
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
+use once_cell::sync::Lazy;
 use reqwest::{multipart, Body};
 use serde_json::json;
 use sha2::{Digest, Sha256};
@@ -18,7 +19,7 @@ use crate::image::ImageName;
 use crate::progress::{create_chunk_pb, ProgressBarType};
 use crate::wrapper::stream_file_with_progress;
 
-async fn loads_bytes_and_sha(descr_path: &Path) -> anyhow::Result<(Vec<u8>, String)> {
+async fn load_bytes_and_sha(descr_path: &Path) -> anyhow::Result<(Vec<u8>, String)> {
     let file_descr_bytes = tokio::fs::read(descr_path).await?;
     let mut sha256 = Sha256::new();
     sha256.update(&file_descr_bytes);
@@ -26,46 +27,13 @@ async fn loads_bytes_and_sha(descr_path: &Path) -> anyhow::Result<(Vec<u8>, Stri
     Ok((file_descr_bytes, descr_sha256))
 }
 
-pub async fn resolve_repo() -> anyhow::Result<String> {
-    Ok(env::var("REGISTRY_URL").unwrap_or("https://registry.golem.network".to_string()))
-    /*
-    const PROTOCOL: &str = "http";
-    const DOMAIN: &str = "registry.dev.golem.network";
-    use trust_dns_resolver::config::{ResolverConfig, ResolverOpts};
-    use trust_dns_resolver::TokioAsyncResolver;
-            let resolver: TokioAsyncResolver =
-                TokioAsyncResolver::tokio(ResolverConfig::google(), ResolverOpts::default())?;
-
-            let lookup = resolver
-                .srv_lookup(format!("_girepo._tcp.{DOMAIN}"))
-                .await?;
-            let srv = lookup
-                .iter()
-                .next()
-                .ok_or_else(|| anyhow::anyhow!("Repository SRV record not found at {DOMAIN}"))?;
-            let base_url = format!(
-                "{}://{}:{}",
-                PROTOCOL,
-                srv.target().to_string().trim_end_matches('.'),
-                srv.port()
-            );
-        */
-    /*
-    let client = awc::Client::new();
-    let response = client
-        .get(format!("{base_url}/status"))
-        .send()
-        .await
-        .map_err(|e| anyhow::anyhow!("Repository status check failed: {}", e))?;
-
-    if !response.status().is_success() {
-        return Err(anyhow::anyhow!(
-            "Repository status check failed with code {}",
-            response.status().as_u16()
-        ));
-    }*/
-    // Ok(base_url)
+fn get_repository_url() -> String {
+    let repo_url = env::var("REGISTRY_URL").unwrap_or("https://registry.golem.network".to_string());
+    let repo_url = repo_url.trim_end_matches('/').to_string();
+    repo_url
 }
+
+pub static REGISTRY_URL: Lazy<String> = Lazy::new(get_repository_url);
 
 #[derive(Debug, serde::Deserialize)]
 pub struct ValidateUploadResponse {
@@ -77,9 +45,9 @@ pub struct ValidateUploadResponse {
 
 pub async fn check_login(user_name: &str, pat: &str) -> anyhow::Result<bool> {
     println!(" * Checking credentials for {}...", user_name);
-    let repo_url = resolve_repo().await?;
+    let repo_url = REGISTRY_URL.as_str();
 
-    let check_login_endpoint = format!("{repo_url}/auth/pat/login").replace("//auth", "/auth");
+    let check_login_endpoint = format!("{repo_url}/auth/pat/login");
     //println!("Validating image at: {}", validate_endpoint);
 
     let post_data = json!(
@@ -119,23 +87,21 @@ pub async fn check_login(user_name: &str, pat: &str) -> anyhow::Result<bool> {
 }
 
 pub async fn attach_to_repo(
-    descr_path: &Path,
+    descr_sha256: &str,
     image_name: &ImageName,
     login: &str,
     pat: &str,
     check: bool,
 ) -> anyhow::Result<()> {
-    if image_name.user.is_none() {
+    let Some(image_user_name) = image_name.user.clone() else {
         return Err(anyhow::anyhow!("Image name must contain user"));
-    }
-    let (_, descr_sha256) = loads_bytes_and_sha(descr_path).await?;
-    let repo_url = resolve_repo().await?;
+    };
+    let repo_url = REGISTRY_URL.as_str();
 
-    let add_tag_endpoint =
-        format!("{repo_url}/v1/image/descr/attach/{descr_sha256}").replace("//v1", "/v1");
+    let add_tag_endpoint = format!("{repo_url}/v1/image/descr/attach/{descr_sha256}");
     let form = multipart::Form::new();
     let form = form.text("tag", image_name.tag.clone());
-    let form = form.text("username", image_name.user.clone().unwrap());
+    let form = form.text("username", image_user_name);
     let form = form.text("repository", image_name.repository.clone());
     let form = form.text("login", login.to_string());
     let form = form.text("token", pat.to_string());
@@ -171,27 +137,26 @@ pub async fn attach_to_repo(
                 text
             )),
             Err(e) => Err(anyhow::anyhow!("Not possible to add to repository: {}", e)),
-        };
-    } else {
-        let text = response.text().await?;
-        if check {
-            println!(" -- checked successfully");
-        } else {
-            println!(" -- success: {}", text);
         }
+    }
+    let text = response.text().await?;
+    if check {
+        println!(" -- checked successfully");
+    } else {
+        println!(" -- success: {}", text);
     }
     Ok(())
 }
 
 //returns if full upload is needed
 pub async fn upload_descriptor(descr_path: &Path) -> anyhow::Result<bool> {
-    let repo_url = resolve_repo().await?;
-    let vu = validate_upload(descr_path).await?;
+    let repo_url = REGISTRY_URL.as_str();
+    let (_, descr_sha256) = load_bytes_and_sha(descr_path).await?;
+    let vu = validate_upload(&descr_sha256).await?;
     if vu.descriptor != "ok" {
         //upload descriptor if not found
         push_descr(descr_path).await?;
     } else {
-        let (_, descr_sha256) = loads_bytes_and_sha(descr_path).await?;
         println!(" -- descriptor already uploaded");
         println!(" -- download link: {}/download/{}", repo_url, descr_sha256);
     }
@@ -207,20 +172,21 @@ pub async fn upload_descriptor(descr_path: &Path) -> anyhow::Result<bool> {
 
 pub async fn full_upload(
     path: &Path,
-    descr_path: &Path,
+    descr: &FileChunkDesc,
     upload_workers: usize,
 ) -> anyhow::Result<()> {
-    let vu = validate_upload(descr_path).await?;
+    let vu = validate_upload(&descr.get_descr_hash_str()).await?;
     if vu.descriptor != "ok" {
         return Err(anyhow!("Failed to register descriptor in repository"));
     }
 
     if let Some(status) = vu.status {
         if status != "full" {
-            push_chunks(path, descr_path, vu.chunks, upload_workers).await?;
+
+            push_chunks(path, descr, vu.chunks, upload_workers).await?;
         }
     }
-    let vu = validate_upload(descr_path).await?;
+    let vu = validate_upload(&descr.get_descr_hash_str()).await?;
     if vu.status.unwrap_or_default() != "full" {
         return Err(anyhow!("Failed to validate image upload"));
     } else {
@@ -230,13 +196,10 @@ pub async fn full_upload(
     Ok(())
 }
 
-pub async fn validate_upload(file_descr: &Path) -> anyhow::Result<ValidateUploadResponse> {
-    let (_, descr_sha256) = loads_bytes_and_sha(file_descr).await?;
+pub async fn validate_upload(descr_sha256: &str) -> anyhow::Result<ValidateUploadResponse> {
+    let repo_url = REGISTRY_URL.as_str();
 
-    let repo_url = resolve_repo().await?;
-
-    let validate_endpoint =
-        format!("{repo_url}/v1/image/descr/{descr_sha256}").replace("//v1", "/v1");
+    let validate_endpoint = format!("{repo_url}/v1/image/descr/{descr_sha256}");
     //println!("Validating image at: {}", validate_endpoint);
     let client = reqwest::Client::new();
     let response = client
@@ -250,11 +213,11 @@ pub async fn validate_upload(file_descr: &Path) -> anyhow::Result<ValidateUpload
 }
 
 pub async fn push_descr(file_path: &Path) -> anyhow::Result<()> {
-    let repo_url = resolve_repo().await?;
+    let repo_url = REGISTRY_URL.as_str();
     println!(" * Uploading image descriptor to: {}", repo_url);
-    let (_, descr_sha256) = loads_bytes_and_sha(file_path).await?;
+    let (_, descr_sha256) = load_bytes_and_sha(file_path).await?;
 
-    let descr_endpoint = format!("{repo_url}/v1/image/push/descr").replace("//v1", "/v1");
+    let descr_endpoint = format!("{repo_url}/v1/image/push/descr");
     let client = reqwest::Client::new();
     let form = multipart::Form::new();
     let pb = create_chunk_pb(1, ProgressBarType::DescriptorUpload);
@@ -306,9 +269,9 @@ pub async fn upload_single_chunk(
     pb_details: ProgressBar,
     pb_total: ProgressBar,
 ) -> anyhow::Result<()> {
-    let repo_url = resolve_repo().await?;
+    let repo_url = REGISTRY_URL.as_str();
     //println!("Uploading image to: {}", repo_url);
-    let descr_endpoint = format!("{repo_url}/v1/image/push/chunk").replace("//v1", "/v1");
+    let descr_endpoint = format!("{repo_url}/v1/image/push/chunk");
     //println!("Uploading image to: {}", descr_endpoint);
     let client = reqwest::Client::new();
     let form = multipart::Form::new();
@@ -369,12 +332,11 @@ pub async fn upload_single_chunk(
 
 pub async fn push_chunks(
     file_path: &Path,
-    file_descr: &Path,
+    file_descr: &FileChunkDesc,
     uploaded_chunks: Option<Vec<u64>>,
     upload_workers: usize,
 ) -> anyhow::Result<()> {
-    let (file_descr_bytes, descr_sha256) = loads_bytes_and_sha(file_descr).await?;
-    let file_descr = FileChunkDesc::deserialize_from_bytes(&file_descr_bytes)?;
+    let descr_sha256 = file_descr.get_descr_hash_str();
     {
         //check if file readable and close immediately
         //it's easier to check now than later in stream wrapper
@@ -406,7 +368,7 @@ pub async fn push_chunks(
 
     let chunks_to_upload = if let Some(uploaded_chunks) = uploaded_chunks {
         let mut chunks = Vec::<FileChunk>::new();
-        for f in file_descr.chunks {
+        for f in &file_descr.chunks {
             let is_uploaded = *uploaded_chunks
                 .get(f.chunk_no as usize)
                 .ok_or(anyhow!("Chunk number {} is out of bounds", f.chunk_no))?;
@@ -417,12 +379,12 @@ pub async fn push_chunks(
                 log::debug!("Chunk {} already uploaded, skipping", f.chunk_no);
                 continue;
             } else {
-                chunks.push(f);
+                chunks.push(f.clone());
             }
         }
         chunks
     } else {
-        file_descr.chunks
+        file_descr.chunks.clone()
     };
 
     pb_chunks.set_message("Chunked upload");
@@ -525,79 +487,3 @@ pub async fn push_chunks(
     println!(" -- chunked upload finished successfully");
     Ok(())
 }
-/*
-pub async fn upload_image<P: AsRef<Path>>(file_path: P) -> anyhow::Result<()> {
-    let file_path = file_path.as_ref();
-    let progress = Arc::new(Progress::with_eta(
-        format!("Uploading '{}'", file_path.display()),
-        0,
-    ));
-
-    let file = tokio::fs::File::open(&file_path)
-        .await
-        .with_context(|| format!("Failed to open file: {}", file_path.display()))
-        .progress_err(&progress)?;
-    let file_name = file_path
-        .file_name()
-        .ok_or_else(|| anyhow::anyhow!("No filename in path: {}", file_path.display()))
-        .progress_err(&progress)?
-        .to_string_lossy()
-        .to_string();
-    let file_size = file
-        .metadata()
-        .await
-        .with_context(|| format!("Failed to retrieve file metadata: {}", file_path.display()))
-        .progress_err(&progress)?
-        .len();
-
-    (*progress).set_total(file_size);
-
-    let repo_url = resolve_repo().await.progress_err(&progress)?;
-    log::debug!("Repository URL: {}", repo_url);
-
-    let (mut tx, rx) = mpsc::channel::<Result<Bytes, awc::error::HttpError>>(1);
-    let (htx, hrx) = oneshot::channel();
-
-    let progress_ = progress.clone();
-    tokio::spawn(async move {
-        let mut buf = [0; 1024 * 64];
-        let mut reader = BufReader::new(file);
-        let mut hasher = sha3::Sha3_224::new();
-
-        while let Ok(read) = reader.read(&mut buf[..]).await {
-            if read == 0 {
-                break;
-            }
-            if let Err(e) = tx.send(Ok(Bytes::from(buf[..read].to_vec()))).await {
-                log::error!("Error uploading image: {}", e);
-            }
-            hasher.update(&buf[..read]);
-            progress_.inc(read as u64);
-        }
-
-        if let Err(e) = htx.send(hasher.finalize().encode_hex()) {
-            log::error!("Error during hash finalization: {}", e);
-        }
-    });
-
-    let client = awc::Client::builder().disable_timeout().finish();
-    client
-        .put(format!("{repo_url}/upload/{file_name}"))
-        .send_stream(rx)
-        .await
-        .map_err(|e| anyhow::anyhow!("Image upload error: {}", e))
-        .progress_result(&progress)?;
-
-    let hash: String = hrx.await?;
-    let bytes = format!("{repo_url}/{file_name}").as_bytes().to_vec();
-    let spinner = Spinner::new(format!("Uploading link for {file_name}")).ticking();
-    client
-        .put(format!("{repo_url}/upload/image.{hash}.link"))
-        .send_body(bytes)
-        .await
-        .map_err(|e| anyhow::anyhow!("Image descriptor upload error: {e}"))
-        .spinner_result(&spinner)?;
-
-    println!("{hash}");
-    Ok(())
-}*/
