@@ -36,19 +36,40 @@ Golem Network is using gvmi images as base for creating VMs for tasks.
 These images are basically squashfs images with some additional metadata.
 They can be prepared from docker images using this (gvmkit-build) tool.
 
+## Quick start
+
+1. Go to the folder with your dockerfile and run
+
+```docker build . -t my_image```
+
+2. Run
+
+```gvmkit-build my_image --push-to <registry_user>/<my_repository>:latest```
+
+
+
 ## Naming image
 
-The tool as main argument is taking docker image name.
+The tool as main argument takes docker image name.
 
-Docker Image id is composed maximum of three parts: ```<username>/<image_name>:tag```
-It can be also for example ```<image_name>``` (tag is defaulting to latest)
+Docker image name can be resolved using ImageId + tag or Repository name + tag.
+Repository name can be composed of maximum two parts: ```<username>/<repository>```
 
-Following command will build image and create *.gvmi file in current directory
+Examples:
+```python```  resolves to ```python:latest```
+```python:3.8``` resolves to ```python:3.8```
+```golemfactory/blender``` resolves to ```golemfactory/blender:latest```
+You can also use image id instead of name, use ```docker image ls``` to find your image id.
+
+Following command will build image and create *.gvmi file in current directory.
+
 ```
-gvmkit-build <docker_image_id>
+gvmkit-build <image_name>
 ```
 
 If image not exist locally the tool is trying to pull it from docker hub.
+
+To use it in Golem Network, you have to upload it to registry portal.
 
 To successfully add image to registry portal you have to name image accordingly or use
 ```
