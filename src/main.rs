@@ -82,7 +82,7 @@ use tokio::fs;
 use crate::chunks::FileChunkDesc;
 use crate::login::remove_credentials;
 use crate::progress::set_progress_bar_settings;
-use crate::upload::{attach_to_repo, full_upload, upload_descriptor, REGISTRY_URL};
+use crate::upload::{attach_to_repo, check_login, full_upload, upload_descriptor, REGISTRY_URL};
 use tokio::fs::File;
 use tokio::io::AsyncWriteExt;
 
@@ -168,6 +168,13 @@ async fn main() -> anyhow::Result<()> {
         if let (Ok(registry_user), Ok(registry_token)) =
             (env::var("REGISTRY_USER"), env::var("REGISTRY_TOKEN"))
         {
+            let res = check_login(&registry_user, &registry_token).await?;
+            if !res {
+                return Err(anyhow::anyhow!(
+                    "Login to golem registry: {} failed",
+                    REGISTRY_URL.as_str()
+                ));
+            }
             (registry_user, registry_token)
         } else if let Some(user_name) = &push_image_name.as_ref().map(|x| &x.user).unwrap_or(&None)
         {
