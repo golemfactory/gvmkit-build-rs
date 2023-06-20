@@ -38,15 +38,27 @@ They can be prepared from docker images using this (gvmkit-build) tool.
 
 ## Quick start
 
-1. Go to the folder with your dockerfile and run
+1. Make sure your docker service is running and you have gvmkit-build installed
+
+2. Go to the folder with your dockerfile and run
 
 ```docker build . -t my_image```
 
-2. Run
+3. Create account on registry portal https://registry.golem.network
 
-```gvmkit-build my_image --push-to <registry_user>/<my_repository>:latest```
+Let's assume your user name is golem
 
+4. Create repository on registry portal
 
+Let's assume you created repository named my_example
+
+5. Create and copy personal access token from registry portal
+
+6. Run (you will be asked for login and personal access token)
+
+```gvmkit-build my_image --push-to golem/my_example:latest```
+
+7. Your tag ```golem/my_example:latest``` is ready to use in one of Golem Network APIs
 
 ## Naming image
 
