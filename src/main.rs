@@ -168,6 +168,7 @@ async fn main() -> anyhow::Result<()> {
         if let (Ok(registry_user), Ok(registry_token)) =
             (env::var("REGISTRY_USER"), env::var("REGISTRY_TOKEN"))
         {
+            println!(" -- Using credentials from environment variables (REGISTRY_USER and REGISTRY_TOKEN)");
             let res = check_login(&registry_user, &registry_token).await?;
             if !res {
                 return Err(anyhow::anyhow!(
