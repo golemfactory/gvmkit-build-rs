@@ -150,7 +150,7 @@ async fn main() -> anyhow::Result<()> {
             let push_image_name = ImageName::from_str_name(&cmd_image_name)?;
             if push_image_name.user.is_none() {
                 return Err(anyhow::anyhow!(
-                "You have to specify username. Instead of --push you can use --push-to <username>/<repository>:<tag>"
+                "You have to specify username.\nInstead of --push you can use --push-to <username>/<repository>:<tag>\nAlternatively you add --nologin option to upload image anonymously"
             ));
             }
             Some(push_image_name)
@@ -182,7 +182,7 @@ async fn main() -> anyhow::Result<()> {
             login::login(Some(user_name), false).await?
         } else {
             return Err(anyhow::anyhow!(
-                    "You have to specify username. Instead of --push you can use --push-to <username>/<repository>:<tag>"
+                    "You have to specify username.\nInstead of --push you can use --push-to <username>/<repository>:<tag>\nYou can also add --nologin to upload image anonymously"
                 ));
         }
     } else {
@@ -255,7 +255,7 @@ async fn main() -> anyhow::Result<()> {
                                     None
                                 } else {
                                     println!(" -- file descriptor already exists and is newer");
-                                    println!(" -- image hash: sha3:{}", hex::encode(descr.sha3));
+                                    println!("Image link (for use in SDK): {}", hex::encode(descr.sha3));
                                     Some(descr)
                                 }
                             }
@@ -286,7 +286,7 @@ async fn main() -> anyhow::Result<()> {
             let descr = chunks::create_descriptor(&path, chunk_size as usize).await?;
             file.write_all(&descr.serialize_to_bytes()).await?;
             println!(" -- file descriptor created successfully");
-            println!(" -- image hash: sha3:{}", hex::encode(descr.sha3));
+            println!(" -- image link (for use in SDK): {}", hex::encode(descr.sha3));
             descr
         }
     };
