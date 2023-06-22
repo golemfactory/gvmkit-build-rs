@@ -180,19 +180,34 @@ pub async fn full_upload(
         return Err(anyhow!("Failed to register descriptor in repository"));
     }
 
-    if let Some(status) = vu.status {
+    if let Some(status) = &vu.status {
         if status != "full" {
             push_chunks(path, descr, vu.chunks, upload_workers).await?;
+            //Golem Registry is using NFS - wait for files to sync on server side.
+            //Two seconds should be enough
+            let mut tries = 1;
+            loop {
+                let vu = validate_upload(&descr.get_descr_hash_str()).await?;
+                if vu.status.unwrap_or_default() != "full" {
+                    tries += 1;
+                    if tries > 6 {
+                        break Err(anyhow!("Failed to validate image upload"));
+                    }
+                    println!("Image not validated, trying again in 5 seconds {}/{}", tries, 6);
+                    tokio::time::sleep(Duration::from_secs(5)).await;
+                } else {
+                    println!(" -- image validated successfully");
+                    break Ok(());
+                }
+            }
+        } else {
+            println!(" -- image validated successfully");
+            Ok(())
         }
-    }
-    let vu = validate_upload(&descr.get_descr_hash_str()).await?;
-    if vu.status.unwrap_or_default() != "full" {
-        return Err(anyhow!("Failed to validate image upload"));
     } else {
-        println!(" -- image validated successfully");
+        Err(anyhow!("Failed to validate image upload"))
     }
 
-    Ok(())
 }
 
 pub async fn validate_upload(descr_sha256: &str) -> anyhow::Result<ValidateUploadResponse> {
@@ -318,10 +333,12 @@ pub async fn upload_single_chunk(
                 Ok(())
             } else {
                 let status = res.status();
+                let error_msg = res.text().await.unwrap_or_default();
 
                 Err(anyhow::anyhow!(
-                    "Image upload failed with code {}",
-                    status.as_u16()
+                    "Image upload failed with code {}, msg: {}",
+                    status.as_u16(),
+                    error_msg
                 ))
             }
         }
