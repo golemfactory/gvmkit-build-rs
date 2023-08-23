@@ -72,6 +72,12 @@ impl ImageBuilder {
                 return Err(anyhow::anyhow!("Failed to connect to docker: {}", err));
             }
         };
+        let docker = docker.with_timeout(std::time::Duration::from_secs(
+            env::var("DOCKER_TIMEOUT")
+                .unwrap_or("3600".to_string())
+                .parse::<u64>()
+                .expect("Failed to parse DOCKER_TIMEOUT env variable"),
+        ));
 
         match docker.version().await {
             Ok(version) => {
@@ -94,7 +100,8 @@ impl ImageBuilder {
         let image_base_name = parsed_name.to_base_name();
         let tag_from_image_name = parsed_name.tag;
 
-        if docker.inspect_image(&self.image_name).await.is_err() {
+        let inspect_image_result = docker.inspect_image(&self.image_name).await;
+        if inspect_image_result.is_err() {
             let mp = MultiProgress::new();
             let layers = Arc::new(Mutex::new(HashMap::<String, ProgressBar>::new()));
 
@@ -179,7 +186,11 @@ impl ImageBuilder {
         //pb.finish_and_clear();
 
         println!(" * Step2 - inspect docker image: {} ...", self.image_name);
-        let image = docker.inspect_image(&self.image_name).await?;
+        let image = if let Ok(inspect_image_result) = inspect_image_result {
+            inspect_image_result
+        } else {
+            docker.inspect_image(&self.image_name).await?
+        };
         let image_id = image.id.unwrap();
         let image_id = if image_id.starts_with("sha256:") {
             image_id.replace("sha256:", "")
