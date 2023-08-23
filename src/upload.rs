@@ -193,7 +193,10 @@ pub async fn full_upload(
                     if tries > 6 {
                         break Err(anyhow!("Failed to validate image upload"));
                     }
-                    println!("Image not validated, trying again in 5 seconds {}/{}", tries, 6);
+                    println!(
+                        "Image not validated, trying again in 5 seconds {}/{}",
+                        tries, 6
+                    );
                     tokio::time::sleep(Duration::from_secs(5)).await;
                 } else {
                     println!(" -- image validated successfully");
@@ -207,7 +210,6 @@ pub async fn full_upload(
     } else {
         Err(anyhow!("Failed to validate image upload"))
     }
-
 }
 
 pub async fn validate_upload(descr_sha256: &str) -> anyhow::Result<ValidateUploadResponse> {

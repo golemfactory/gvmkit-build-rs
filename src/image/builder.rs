@@ -72,6 +72,12 @@ impl ImageBuilder {
                 return Err(anyhow::anyhow!("Failed to connect to docker: {}", err));
             }
         };
+        let docker = docker.with_timeout(std::time::Duration::from_secs(
+            env::var("DOCKER_TIMEOUT")
+                .unwrap_or("3600".to_string())
+                .parse::<u64>()
+                .expect("Failed to parse DOCKER_TIMEOUT env variable"),
+        ));
 
         match docker.version().await {
             Ok(version) => {

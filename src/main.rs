@@ -255,7 +255,10 @@ async fn main() -> anyhow::Result<()> {
                                     None
                                 } else {
                                     println!(" -- file descriptor already exists and is newer");
-                                    println!("Image link (for use in SDK): {}", hex::encode(descr.sha3));
+                                    println!(
+                                        "Image link (for use in SDK): {}",
+                                        hex::encode(descr.sha3)
+                                    );
                                     Some(descr)
                                 }
                             }
@@ -286,7 +289,10 @@ async fn main() -> anyhow::Result<()> {
             let descr = chunks::create_descriptor(&path, chunk_size as usize).await?;
             file.write_all(&descr.serialize_to_bytes()).await?;
             println!(" -- file descriptor created successfully");
-            println!(" -- image link (for use in SDK): {}", hex::encode(descr.sha3));
+            println!(
+                " -- image link (for use in SDK): {}",
+                hex::encode(descr.sha3)
+            );
             descr
         }
     };
