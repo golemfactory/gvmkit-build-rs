@@ -30,7 +30,7 @@ clap = { version = "4.2.7", features = ["derive"] }
 tar = "0.4"
 tokio = { version = "1.25.0", features = ["macros", "fs"] }
 tokio-util = "0.7.8"
-trust-dns-resolver = { version = "0.22.0" }
+trust-dns-resolver = { version = "0.23.0" }
 hyper = "0.14.0"
 keyring = "2.0"
 console = { version = "0.15", default-features = false, features = ["ansi-parsing"] }
@@ -42,7 +42,7 @@ rpassword = "7.2"
 once_cell = "1.17"
 
 [dev-dependencies]
-fastrand = "1.9.0"
+fastrand = "2.0.0"
 
 [package.metadata.maturin]
 name = "gvmkit_build"
