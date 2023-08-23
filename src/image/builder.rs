@@ -94,7 +94,8 @@ impl ImageBuilder {
         let image_base_name = parsed_name.to_base_name();
         let tag_from_image_name = parsed_name.tag;
 
-        if docker.inspect_image(&self.image_name).await.is_err() {
+        let inspect_image_result = docker.inspect_image(&self.image_name).await;
+        if inspect_image_result.is_err() {
             let mp = MultiProgress::new();
             let layers = Arc::new(Mutex::new(HashMap::<String, ProgressBar>::new()));
 
@@ -179,7 +180,11 @@ impl ImageBuilder {
         //pb.finish_and_clear();
 
         println!(" * Step2 - inspect docker image: {} ...", self.image_name);
-        let image = docker.inspect_image(&self.image_name).await?;
+        let image = if let Ok(inspect_image_result) = inspect_image_result {
+            inspect_image_result
+        } else {
+            docker.inspect_image(&self.image_name).await?
+        };
         let image_id = image.id.unwrap();
         let image_id = if image_id.starts_with("sha256:") {
             image_id.replace("sha256:", "")
