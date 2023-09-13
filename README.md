@@ -180,7 +180,7 @@ cargo run --release -- <image_name> --push --nologin
 If you are sure that you have proper *.gvmi file for example my-test.gvmi you can use 
 
 ```
-gvmkit-build --direct-file-upload my-test.gvmi --push-to <user_name><image_name>/<tag>
+gvmkit-build --direct-file-upload my-test.gvmi --push-to <user_name>/<image_name>:<tag>
 ```
 or anonymously
 ```
