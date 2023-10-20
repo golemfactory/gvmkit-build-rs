@@ -67,7 +67,7 @@ struct CmdArgs {
     /// lz4 and xz do not support this option
     #[arg(help_heading = Some("Image creation"), long)]
     compression_level: Option<u32>,
-    /// Specify chunk size (default 2MB)
+    /// Specify chunk size (default 2MB, set this value in bytes)
     #[arg(help_heading = Some("Portal"), long)]
     upload_chunk_size: Option<u64>,
     /// Specify number of upload workers (default 4)
@@ -225,6 +225,12 @@ async fn main() -> anyhow::Result<()> {
     let image_file_size = fs::metadata(&path).await?.len();
     let chunk_size = if let Some(chunk_size) = cmdargs.upload_chunk_size {
         chunk_size
+    } else if image_file_size > 1024 * 1024 * 1024 * 5 {
+        100 * 1024 * 1024
+    } else if image_file_size > 1024 * 1024 * 1024 * 2 {
+        50 * 1024 * 1024
+    } else if image_file_size > 1024 * 1024 * 1024 {
+        20 * 1024 * 1024
     } else if image_file_size > 1024 * 1024 * 500 {
         10 * 1024 * 1024
     } else if image_file_size > 1024 * 1024 * 200 {
