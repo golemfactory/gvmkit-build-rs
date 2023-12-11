@@ -4,7 +4,7 @@ build-backend = "maturin"
 
 [project]
 name = "gvmkit-build"
-version = "0.3.17"
+version = "0.3.18"
 description = "Golem VM Image builder."
 readme = "README.md"
 requires-python = ">=3.7"

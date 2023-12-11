@@ -19,7 +19,7 @@ use std::env;
 const COMPRESSION_POSSIBLE_VALUES: &[&str] = &["lzo", "gzip", "lz4", "zstd", "xz"];
 
 #[derive(Parser, Debug)]
-#[command(author, version, about, long_about = None)]
+#[command(author, about, long_about = None)]
 struct CmdArgs {
     /// Input Docker image name
     image_name: Option<String>,
@@ -55,10 +55,10 @@ struct CmdArgs {
     #[arg(help_heading = Some("Legacy/unused image options"), long)]
     env: Vec<String>,
     /// Specify additional image volume
-    #[arg(help_heading = Some("Legacy/unused image options"), short, long)]
+    #[arg(help_heading = Some("Legacy/unused image options"), long)]
     vol: Vec<String>,
     /// Specify image entrypoint
-    #[arg(help_heading = Some("Legacy/unused image options"), short, long)]
+    #[arg(help_heading = Some("Legacy/unused image options"), long)]
     entrypoint: Option<String>,
     /// Possible values: lzo, gzip, lz4, zstd, xz
     #[arg(help_heading = Some("Image creation"), long, default_value = "lzo")]
@@ -92,6 +92,8 @@ async fn main() -> anyhow::Result<()> {
     let log_level = env::var("RUST_LOG").unwrap_or("info,bollard=warn,hyper=warn".to_string());
     env::set_var("RUST_LOG", log_level);
     env_logger::init();
+
+    println!("Golem Image Builder v{}", env!("CARGO_PKG_VERSION"));
 
     let cmdargs = <CmdArgs as Parser>::parse();
 
