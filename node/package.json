@@ -1,6 +1,6 @@
 {
   "name": "@golem-sdk/gvmkit-build",
-  "version": "0.3.13",
+  "version": "0.3.16",
   "description": "",
   "main": "binary.js",
   "private": false,
@@ -17,7 +17,7 @@
     "type": "git",
     "url": "https://github.com/golemfactory/gvmkit-build-rs"
   },
-  "author": "Golemfactory <contact@colem.netwok>",
+  "author": "Golemfactory <contact@golem.netwok>",
   "license": "GPL-3",
   "bugs": {
     "url": "https://github.com/golemfactory/gvmkit-build-rs/issues"
