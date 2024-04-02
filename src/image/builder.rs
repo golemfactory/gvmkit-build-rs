@@ -6,9 +6,7 @@ use std::{
 };
 
 use bollard::container;
-use bollard::container::{
-    DownloadFromContainerOptions, LogOutput, LogsOptions, UploadToContainerOptions,
-};
+use bollard::container::{CreateContainerOptions, DownloadFromContainerOptions, LogOutput, LogsOptions, UploadToContainerOptions};
 
 use crate::wrapper::{stream_with_progress, ProgressContext};
 use anyhow::anyhow;
@@ -345,7 +343,10 @@ impl ImageBuilder {
 
             let tool_container = docker
                 .create_container::<String, String>(
-                    None,
+                    Some(CreateContainerOptions{
+                        name: "squashfs_container".to_string(),
+                        platform: Some("linux/amd64".to_string()),
+                    }),
                     container::Config {
                         image: Some(tool_image_name.to_string()),
                         cmd: Some(mksquash_command),
