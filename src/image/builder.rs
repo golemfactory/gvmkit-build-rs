@@ -344,7 +344,7 @@ impl ImageBuilder {
             let tool_container = docker
                 .create_container::<String, String>(
                     Some(CreateContainerOptions{
-                        name: "squashfs_container".to_string(),
+                        name: format!("squashfs_container_{}", rand::random::<u64>()),
                         platform: Some("linux/amd64".to_string()),
                     }),
                     container::Config {
