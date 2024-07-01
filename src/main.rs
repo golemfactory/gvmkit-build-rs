@@ -77,8 +77,8 @@ struct CmdArgs {
     /// Hide progress bars during operation
     #[arg(help_heading = Some("Extra options"), long)]
     hide_progress: bool,
-    #[arg(help_heading = Some("Write json info to info.json"), long)]
-    extra_json_info: bool,
+    #[arg(help_heading = Some("Write json info to specified file"), long)]
+    extra_json_info_path: Option<String>,
 }
 use tokio::fs;
 
@@ -349,9 +349,9 @@ async fn main() -> anyhow::Result<()> {
         None
     };
     // write info to file
-    if cmdargs.extra_json_info {
+    if let Some(json_path) = &cmdargs.extra_json_info_path {
         println!(" * Writing info to info.json");
-        let repo_info_path = PathBuf::from("info.json");
+        let repo_info_path = PathBuf::from(json_path);
         let mut file = File::create(&repo_info_path).await?;
         file.write_all(&serde_json::to_vec_pretty(&json!({
             "repoInfo": &repo_info,

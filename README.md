@@ -195,3 +195,7 @@ Look for help for more information. Note that currently zstd is not supported by
 ```
 gvmkit-build --help
 ```
+
+## Integration with scripts
+
+Use --extra-json-info-path=my-output.json to save additional information about image in json format.
