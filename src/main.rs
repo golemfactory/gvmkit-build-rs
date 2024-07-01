@@ -14,6 +14,7 @@ use crate::image::{ImageBuilder, ImageName};
 use clap::Parser;
 use std::path::PathBuf;
 
+use serde_json::json;
 use std::env;
 
 const COMPRESSION_POSSIBLE_VALUES: &[&str] = &["lzo", "gzip", "lz4", "zstd", "xz"];
@@ -76,6 +77,8 @@ struct CmdArgs {
     /// Hide progress bars during operation
     #[arg(help_heading = Some("Extra options"), long)]
     hide_progress: bool,
+    #[arg(help_heading = Some("Write json info to info.json"), long)]
+    extra_json_info: bool,
 }
 use tokio::fs;
 
@@ -305,7 +308,7 @@ async fn main() -> anyhow::Result<()> {
         }
     };
 
-    if cmdargs.push || cmdargs.push_to.is_some() {
+    let repo_info = if cmdargs.push || cmdargs.push_to.is_some() {
         println!(
             "Uploading image to golem registry: {}",
             REGISTRY_URL.as_str()
@@ -315,7 +318,7 @@ async fn main() -> anyhow::Result<()> {
         if full_upload_needed {
             if let Some(push_image_name) = &push_image_name {
                 //check if we can attach to the repo before uploading the file
-                attach_to_repo(
+                let _repo_info = attach_to_repo(
                     &descr.get_descr_hash_str(),
                     push_image_name,
                     &user_name,
@@ -323,21 +326,41 @@ async fn main() -> anyhow::Result<()> {
                     true,
                 )
                 .await?;
-            }
+            };
             full_upload(&path, &descr, cmdargs.upload_workers).await?;
         }
+
         if let Some(push_image_name) = &push_image_name {
             //attach to repo after upload
-            attach_to_repo(
-                &descr.get_descr_hash_str(),
-                push_image_name,
-                &user_name,
-                &pat,
-                false,
+            Some(
+                attach_to_repo(
+                    &descr.get_descr_hash_str(),
+                    push_image_name,
+                    &user_name,
+                    &pat,
+                    false,
+                )
+                .await?,
             )
-            .await?;
+        } else {
+            None
         }
-    }
+    } else {
+        None
+    };
+    // write info to file
+    if cmdargs.extra_json_info {
+        println!(" * Writing info to info.json");
+        let repo_info_path = PathBuf::from("info.json");
+        let mut file = File::create(&repo_info_path).await?;
+        file.write_all(&serde_json::to_vec_pretty(&json!({
 
+            "repoInfo": &repo_info,
+        "imagePath": path.display().to_string(),
+        "imageDescrPath": descr_path.display().to_string(),
+        "hash": &descr.get_descr_hash_str(),
+        }))?)
+        .await?;
+    }
     Ok(())
 }

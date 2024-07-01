@@ -10,6 +10,7 @@ use std::time::{Duration, Instant};
 
 use once_cell::sync::Lazy;
 use reqwest::{multipart, Body};
+use serde::{Deserialize, Serialize};
 use serde_json::json;
 use sha2::{Digest, Sha256};
 use tokio::io::AsyncReadExt;
@@ -86,13 +87,21 @@ pub async fn check_login(user_name: &str, pat: &str) -> anyhow::Result<bool> {
     }
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AttachInfo {
+    pub url: String,
+    pub user: String,
+    pub repo: String,
+    pub tag: String,
+}
+
 pub async fn attach_to_repo(
     descr_sha256: &str,
     image_name: &ImageName,
     login: &str,
     pat: &str,
     check: bool,
-) -> anyhow::Result<()> {
+) -> anyhow::Result<AttachInfo> {
     let Some(image_user_name) = image_name.user.clone() else {
         return Err(anyhow::anyhow!("Image name must contain user"));
     };
@@ -101,7 +110,7 @@ pub async fn attach_to_repo(
     let add_tag_endpoint = format!("{repo_url}/v1/image/descr/attach/{descr_sha256}");
     let form = multipart::Form::new();
     let form = form.text("tag", image_name.tag.clone());
-    let form = form.text("username", image_user_name);
+    let form = form.text("username", image_user_name.clone());
     let form = form.text("repository", image_name.repository.clone());
     let form = form.text("login", login.to_string());
     let form = form.text("token", pat.to_string());
@@ -145,7 +154,12 @@ pub async fn attach_to_repo(
     } else {
         println!(" -- success: {}", text);
     }
-    Ok(())
+    Ok(AttachInfo {
+        url: repo_url.to_string(),
+        repo: image_name.repository.clone(),
+        tag: image_name.tag.clone(),
+        user: image_user_name,
+    })
 }
 
 //returns if full upload is needed
