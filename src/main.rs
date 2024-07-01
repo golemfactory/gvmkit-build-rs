@@ -354,11 +354,10 @@ async fn main() -> anyhow::Result<()> {
         let repo_info_path = PathBuf::from("info.json");
         let mut file = File::create(&repo_info_path).await?;
         file.write_all(&serde_json::to_vec_pretty(&json!({
-
             "repoInfo": &repo_info,
-        "imagePath": path.display().to_string(),
-        "imageDescrPath": descr_path.display().to_string(),
-        "hash": &descr.get_descr_hash_str(),
+            "imagePath": path.display().to_string(),
+            "imageDescrPath": descr_path.display().to_string(),
+            "hash": &descr.get_descr_hash_str(),
         }))?)
         .await?;
     }
