@@ -350,7 +350,7 @@ async fn main() -> anyhow::Result<()> {
     };
     // write info to file
     if let Some(json_path) = &cmdargs.extra_json_info_path {
-        println!(" * Writing info to info.json");
+        println!(" * Writing info to {}", json_path);
         let repo_info_path = PathBuf::from(json_path);
         let mut file = File::create(&repo_info_path).await?;
         file.write_all(&serde_json::to_vec_pretty(&json!({
