@@ -17,7 +17,7 @@ const os = require("os");
 const { join } = require("path");
 const cTable = require("console.table");
 
-const error = (msg) => {
+const error = msg => {
   console.error(msg);
   process.exit(1);
 };
@@ -43,7 +43,7 @@ class GvmKitBuildBinary extends Binary {
     const is_zip = this.url.endsWith(".zip");
 
     return axios({ url: this.url, responseType: "stream" })
-      .then(async (res) => {
+      .then(async res => {
         if (is_zip) {
           await res.data.pipe(unzipper.Extract({ path: this.binaryDirectory }));
         } else {
@@ -55,7 +55,7 @@ class GvmKitBuildBinary extends Binary {
           `${this.name ? this.name : "Your package"} has been installed!`
         );
       })
-      .catch((e) => {
+      .catch(e => {
         error(`Error fetching release: ${e.message}`);
       });
   }
@@ -66,26 +66,26 @@ const supportedPlatforms = [
     TYPE: "Windows_NT",
     ARCHITECTURE: "x64",
     RUST_TARGET: "x86_64-pc-windows-msvc",
-    PACKING: "zip",
+    PACKING: "zip"
   },
   {
     TYPE: "Linux",
     ARCHITECTURE: "x64",
     RUST_TARGET: "x86_64-unknown-linux-musl",
-    PACKING: "tar.gz",
+    PACKING: "tar.gz"
   },
   {
     TYPE: "Darwin",
     ARCHITECTURE: "x64",
     RUST_TARGET: "x86_64-apple-darwin",
-    PACKING: "tar.gz",
+    PACKING: "tar.gz"
   },
   {
     TYPE: "Darwin",
     ARCHITECTURE: "arm64",
     RUST_TARGET: "aarch64-apple-darwin",
-    PACKING: "tar.gz",
-  },
+    PACKING: "tar.gz"
+  }
 ];
 
 const getPlatform = () => {
@@ -113,7 +113,7 @@ const getBinary = () => {
   const platform = getPlatform();
   // the url for this binary is constructed from values in `package.json`
   // https://github.com/cloudflare/binary-install/releases/download/v1.0.0/binary-install-example-v1.0.0-x86_64-apple-darwin.tar.gz
-  const url = `${repository.url}/releases/download/v0.3.18/gvmkit-build-${platform.RUST_TARGET}.${platform.PACKING}`;
+  const url = `${repository.url}/releases/download/v${version}/gvmkit-build-${platform.RUST_TARGET}.${platform.PACKING}`;
   return new GvmKitBuildBinary(url, { name: "gvmkit-build" });
 };
 
@@ -135,5 +135,5 @@ const uninstall = () => {
 module.exports = {
   install,
   run,
-  uninstall,
+  uninstall
 };
