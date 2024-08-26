@@ -4,6 +4,8 @@ Golem VM Image builder used as companion app for Golem Registry: https://registr
 
 ## Release procedure
 
+This section is intended for developers maintaining this repository, skip it if you are using this tool.
+
 1. Bump versions in Cargo.toml (and according lock) and pyproject.toml and node/package.json
     * The version 0.x.y HAS to be the same in all three files
 2. Create tag with the same version number like v0.x.y
