@@ -2,6 +2,17 @@
 
 Golem VM Image builder used as companion app for Golem Registry: https://registry.golem.network
 
+## Release procedure
+
+1. Bump versions in Cargo.toml (and according lock) and pyproject.toml and node/package.json
+    * The version 0.x.y HAS to be the same in all three files
+2. Create tag with the same version number like v0.x.y
+3. Push tag to github
+4. Run custom action in github with selected tag
+    * Actions -> Actions -> Build Release -> Run workflow -> Select tag v0.x.y -> Run workflow
+    * Observe in logs if everything wen smoothly.
+    * Package should be published to pip and npm repositories, release should be created automatically
+
 ## Requirements
 
 Running docker engine is required. Tool supports Linux, Windows and macOS.
