@@ -62,7 +62,7 @@ jobs:
           tar czvf $ARCHIVE_FILE -C target/${{ matrix.target }}/release-lto gvmkit-build
           shasum -a 256 $ARCHIVE_FILE > $ARCHIVE_FILE.sha256
       - name: "Archive binary"
-        if: "matrix.runs-on == 'macos-latest'"
+        if: "matrix.runs-on == 'macos-13'"
         run: |
           ARCHIVE_FILE=gvmkit-build-${{ matrix.target }}.tar.gz
           gtar --format=pax -czvf $ARCHIVE_FILE -C target/${{ matrix.target }}/release-lto gvmkit-build
